@@ -24,6 +24,7 @@ import { AvatarStack } from "@/components/common/AvatarStack";
 import { ErrorState } from "@/components/common/ErrorState";
 import { LoadingState } from "@/components/common/LoadingState";
 import { SectionCard } from "@/components/common/SectionCard";
+import { SavingTipsCard } from "@/components/dashboard/SavingTipsCard";
 import { AddExpenseDialog } from "@/components/expenses/AddExpenseDialog";
 import { ExpenseList } from "@/components/expenses/ExpenseList";
 import { VoiceExpenseDialog } from "@/components/expenses/VoiceExpenseDialog";
@@ -523,6 +524,8 @@ export default function GroupDetailPage() {
               )}
             </SectionCard>
           </div>
+
+          <SavingTipsCard params={{ period: "all", group_id: id }} />
 
           <SectionCard
             titleClassName="text-[20px]"

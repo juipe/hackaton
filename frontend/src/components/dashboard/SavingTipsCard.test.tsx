@@ -80,6 +80,30 @@ describe("SavingTipsCard", () => {
     expect(url).toContain("period=this_month");
   });
 
+  it("передаёт group_id в запрос при использовании на странице группы", async () => {
+    const user = userEvent.setup();
+    const fetchMock = stubFetch(
+      withAuthStub((url) =>
+        url.startsWith("/api/dashboard/saving-tips")
+          ? jsonResponse(TIPS)
+          : errorResponse(404, "?"),
+      ),
+    );
+
+    renderWithProviders(
+      <SavingTipsCard params={{ period: "all", group_id: "group-42" }} />,
+    );
+    await user.click(screen.getByRole("button", { name: /Сгенерировать советы/ }));
+
+    await screen.findByText("Еда — крупная категория");
+
+    const url = requestedUrls(fetchMock).find((entry) =>
+      entry.startsWith("/api/dashboard/saving-tips"),
+    );
+    expect(url).toContain("group_id=group-42");
+    expect(url).toContain("period=all");
+  });
+
   it("показывает ошибку и позволяет повторить запрос", async () => {
     const user = userEvent.setup();
     let attempt = 0;

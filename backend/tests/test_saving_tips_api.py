@@ -34,7 +34,11 @@ def _category(categories: list[Category], slug: str) -> Category:
 class World:
     alice: User
     bob: User
+    carol: User
     family: Group
+    #: A second group of Alice's, used only to prove group-scoped generation
+    #: never leaks another group's spending into the analysed data.
+    trip: Group
 
 
 @pytest.fixture()
@@ -46,7 +50,9 @@ def world(
 ) -> World:
     alice = make_user(name="Alice")
     bob = make_user(name="Bob")
+    carol = make_user(name="Carol")
     family = group_factory(alice, name="Family", currency="RUB", members=[bob])
+    trip = group_factory(alice, name="Trip", currency="RUB", members=[carol])
 
     expense = Expense(
         group_id=family.id,
@@ -59,9 +65,21 @@ def world(
         split_mode=SplitMode.EQUAL.value,
         occurred_at=utcnow(),
     )
+    trip_expense = Expense(
+        group_id=trip.id,
+        created_by=alice.id,
+        title="Flights",
+        amount_cents=50000,
+        currency=trip.currency,
+        category_id=_category(categories, "travel").id,
+        paid_by=alice.id,
+        split_mode=SplitMode.EQUAL.value,
+        occurred_at=utcnow(),
+    )
     db.add(expense)
+    db.add(trip_expense)
     db.commit()
-    return World(alice=alice, bob=bob, family=family)
+    return World(alice=alice, bob=bob, carol=carol, family=family, trip=trip)
 
 
 def _stub_success(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -189,12 +207,44 @@ def test_group_id_scopes_the_analysed_data(
     )
 
     assert response.status_code == 200
+    # 8000 is Family's own expense total — Trip's 50000 (a second group of
+    # Alice's) must never leak in just because she also belongs to it.
     assert captured[0].total_spending_cents == 8000
     assert captured[0].expense_count == 1
     assert captured[0].currency == "RUB"
     assert len(captured[0].categories) == 1
     assert captured[0].categories[0].name == "Продукты"
     assert captured[0].categories[0].percentage == 100.0
+
+
+def test_group_scope_never_includes_another_groups_spending(
+    monkeypatch: pytest.MonkeyPatch,
+    api_client: Callable[[User], TestClient],
+    world: World,
+) -> None:
+    """Generating tips for one group must analyse that group alone — not every
+    group the caller belongs to, and not any other specific group."""
+    captured: list[object] = []
+
+    def _capture(payload: object) -> SavingTipsOut:
+        captured.append(payload)
+        return SavingTipsOut(
+            tips=[
+                SavingTip(title="A", text="A.", type="generic"),
+                SavingTip(title="B", text="B.", type="generic"),
+            ]
+        )
+
+    monkeypatch.setattr(ollama_service, "generate_saving_tips", _capture)
+
+    response = api_client(world.alice).post(
+        "/api/dashboard/saving-tips", params={"group_id": str(world.trip.id)}
+    )
+
+    assert response.status_code == 200
+    assert captured[0].total_spending_cents == 50000
+    assert captured[0].expense_count == 1
+    assert [category.name for category in captured[0].categories] == ["Путешествия"]
 
 
 def test_unknown_period_is_rejected(
