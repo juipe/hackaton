@@ -1,0 +1,7 @@
+-r requirements.txt
+pytest>=8.3
+pytest-cov>=6.0
+httpx>=0.28
+# Правила линтера лежат в pyproject.toml — без этой строки `ruff check .`
+# из README не запустится на чистой машине.
+ruff>=0.16

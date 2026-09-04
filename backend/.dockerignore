@@ -1,0 +1,36 @@
+# Build context excludes. Tests stay in the image on purpose: they are a few KB
+# and keep `docker compose exec backend pytest` possible once requirements-dev
+# is installed.
+
+# Virtualenvs and interpreter caches from the host
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Secrets and local databases must never be baked into a layer
+.env
+.env.*
+*.db
+*.sqlite
+*.sqlite3
+
+# Only meaningful on the build host
+Dockerfile
+.dockerignore
+.git/
+.gitignore
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

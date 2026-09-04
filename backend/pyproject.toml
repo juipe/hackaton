@@ -1,0 +1,34 @@
+[project]
+name = "skladchina-backend"
+version = "1.0.0"
+description = "API «Складчина» — учёт общих расходов"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q --strict-markers"
+filterwarnings = [
+    "ignore:.*does \\*not\\* support Decimal objects natively.*:UserWarning",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "C4"]
+ignore = [
+    # Depends(...) в аргументах по умолчанию — обычный способ объявлять
+    # зависимости FastAPI.
+    "B008",
+    # `class X(str, Enum)` предлагается заменить на `StrEnum`. Это не
+    # косметика: у StrEnum другой `str()` («equal» вместо «SplitMode.EQUAL»),
+    # а значения этих перечислений уходят в БД, в JSON и в сравнения со
+    # строками. Меняем осознанно и вместе с тестами, а не по подсказке линтера.
+    "UP042",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E402"]
+"alembic/versions/*" = ["E501"]

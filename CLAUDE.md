@@ -1,0 +1,160 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this is
+
+"Складчина" (Skladchina) — a shared-expense tracker (Splitwise-style), built for a Sberbank
+hackathon. FastAPI + PostgreSQL backend, React + TypeScript + Tailwind frontend. All UI text,
+demo data, and commit messages are in Russian; the service handles a single currency (RUB).
+
+## Commands
+
+### Run everything
+
+```bash
+docker compose up --build          # Postgres + migrations + seed + API (:8000) + frontend (:3000)
+docker compose down -v             # stop and wipe the DB volume
+```
+
+### Backend (`backend/`)
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements-dev.txt
+
+export DATABASE_URL="postgresql+psycopg://skladchina:skladchina@localhost:5433/skladchina"
+export SECRET_KEY="any-string-at-least-32-chars"   # or put both in backend/.env
+
+alembic upgrade head
+python -m scripts.seed             # demo data; --reset to wipe and rebuild it
+uvicorn app.main:app --reload --port 8000
+```
+
+Tests and linting:
+
+```bash
+python -m pytest                          # full suite — runs on in-memory SQLite, no DB needed
+python -m pytest tests/test_split_engine.py -v
+python -m pytest tests/test_split_engine.py::test_name -v   # single test
+python -m pytest --cov=app
+ruff check .
+ruff check . --fix
+```
+
+Migrations:
+
+```bash
+alembic upgrade head
+alembic downgrade base
+alembic revision --autogenerate -m "what changed"
+```
+
+### Frontend (`frontend/`)
+
+```bash
+npm install
+npm run dev             # Vite dev server on :5173, proxies /api -> :8000
+npm run build            # tsc -b + production build
+npm run typecheck
+npm run test             # Vitest, run once
+npm run test:watch
+```
+
+If the API isn't on 8000: `VITE_API_PROXY_TARGET=http://127.0.0.1:8010 npm run dev`.
+
+### Before pushing
+
+```bash
+cd backend  && python -m pytest && ruff check .
+cd frontend && npm run typecheck && npm run test && npm run build
+```
+
+## Architecture
+
+### Backend layering (`backend/app/`)
+
+Strict three-layer separation, enforced by convention — routes never contain business logic:
+
+- **`api/routes/`** — parses the HTTP request, calls a service, shapes the response. No rules here.
+- **`services/`** — all business logic. Pure enough to unit-test without HTTP (see
+  `tests/test_split_engine.py`, `tests/test_balance_service.py`, `tests/test_invariants.py`).
+- **`repositories/`** — the only layer that talks to the DB (SQLAlchemy queries).
+- **`schemas/`** — Pydantic request/response models, one file per domain concept, mirroring `models/`.
+- **`core/`** — config (`config.py`), auth dependencies (`deps.py`), cookie handling (`cookies.py`),
+  password/JWT (`security.py`), typed HTTP errors (`errors.py`).
+
+Key services worth knowing before touching money logic:
+
+- **`services/split_engine.py`** — pure function turning an expense total + per-participant
+  input into exact integer-cent shares for all four split modes (equal / exact / percentage /
+  shares). Every proportional mode uses largest-remainder distribution so shares always sum
+  exactly to the total — no float ever touches a monetary value anywhere in the codebase.
+- **`services/balance_service.py`** — computes per-user net balances for a group from expenses
+  + payments. The invariant "sum of a group's balances is always zero" is enforced and tested
+  (`tests/test_invariants.py`) — don't break it.
+- **`services/simplify_service.py`** — debt simplification: greedily matches the largest debtor
+  against the largest creditor (a max-heap on each side) to produce at most `n-1` transfers for
+  `n` participants, without changing anyone's net balance. Tie-breaking is by user id string, so
+  output is deterministic.
+- **`utils/money.py`** — all monetary values are integer cents end-to-end. Conversion to/from
+  decimal strings (Russian formatting: `"1 234,56 ₽"`, comma decimal separator, non-breaking
+  space thousands grouping) happens only here, only for display/parsing.
+
+Auth: session JWT in an HttpOnly cookie (`skladchina_session`) plus a separate readable CSRF
+cookie (`skladchina_csrf`) that the frontend must echo back as an `X-CSRF-Token` header on
+unsafe methods (see `core/cookies.py`, `core/deps.py`, and `frontend/src/lib/api.ts`). No token
+ever lives in `localStorage`. Every group-scoped route depends on `require_membership` /
+`require_owner` from `core/deps.py` — authorization is structurally hard to forget.
+
+Expense deletion is soft (`deleted_at`), so group history and the activity feed stay intact.
+
+### Frontend (`frontend/src/`)
+
+- **`pages/`** — route-level screens, wired up in `routes.tsx`. Authenticated routes are nested
+  under `RequireAuth` + `AppLayout` in `components/layout/`.
+- **`hooks/`** — one file per API resource (`useGroups.ts`, `useExpenses.ts`, `useBalances.ts`,
+  etc.), each a thin TanStack Query wrapper. There is no manual `useEffect(fetch...)` anywhere —
+  all server state goes through these hooks, and mutations invalidate the relevant query keys so
+  screens refresh themselves.
+- **`lib/api.ts`** — the only place that calls `fetch`. Handles the CSRF header, cookie-based
+  auth, and error unwrapping (`ApiError`, `errorMessage()`). Route handlers/hooks should never
+  call `fetch` directly.
+- **`lib/money.ts`** / **`lib/format.ts`** — client-side mirrors of the backend's money/formatting
+  rules for consistent display; the server is still the authority on calculated splits.
+- **`components/ui/`** — design-system primitives (button, dialog, tabs, etc.), built on Radix.
+  **`components/common/`, `layout/`, `balances/`, `expenses/`, `groups/`, `dashboard/`, `charts/`**
+  — feature-grouped components.
+- **`types/api.ts`** — TypeScript types mirroring the backend's Pydantic schemas.
+
+Design tokens (colors, radii, shadows) live as CSS variables in `src/index.css` and as keys in
+`tailwind.config.js` — don't hardcode colors; use the existing tokens (`bg-app`, `text-dim`,
+`text-positive`, `text-negative`, `rounded-card`, `shadow-card`, etc.). Tailwind silently drops a
+class that isn't in the config instead of erroring, so a new token has to be added to
+`tailwind.config.js` before it will take effect.
+
+## Conventions and decisions worth knowing
+
+- **Money is always integer cents**, never a float, anywhere in the stack. See `split_engine.py`
+  and `money.py` above.
+- **Group balances always sum to zero** — an invariant enforced in tests and in the seed script.
+- **Only `RUB`** is accepted server-side; the `currency` field on schemas exists for compatibility
+  only.
+- Commits are in Russian, imperative mood, one change per commit (repo convention — not enforced
+  by tooling).
+- Where to make common changes:
+  - New endpoint → `api/routes/` + `schemas/` + `services/`
+  - Change a calculation rule → `services/` (with a test alongside)
+  - New/changed table → `models/` + a new Alembic revision
+  - New screen → `pages/` + a route in `routes.tsx`
+  - New API call → `hooks/` + a type in `types/api.ts`
+  - Visual changes → tokens in `index.css` / `tailwind.config.js`, primitives in `components/ui/`
+
+## Gotchas
+
+- Postgres from the host is on **port 5433**, not 5432 (avoids clashing with a local Postgres).
+- Backend tests run against in-memory SQLite (`StaticPool`, single shared connection) — fine for
+  tests, but SQLite is *not* viable for actually running the app (concurrent requests raise
+  `InterfaceError`). Use Postgres for real runs.
+- The CSRF cookie name is duplicated in two places that must stay in sync: `COOKIE_NAME` /
+  `CSRF_COOKIE_NAME` (backend env) and the constant in `frontend/src/lib/api.ts`.

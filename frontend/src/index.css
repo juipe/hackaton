@@ -1,0 +1,104 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Визуальный язык «Складчины»: холодно-зелёный фон --app, белые карточки с
+ * крупными скруглениями и мягкой тенью, капсульные кнопки и вкладки.
+ *
+ * Зелёный --primary — цвет действия: первичные кнопки, активный пункт навигации,
+ * активная вкладка, логотип. Знак баланса он не несёт — за это отвечают
+ * --positive / --negative: они темнее и насыщеннее бренда, чтобы число читалось
+ * как число, а не как кнопка. Декоративные плашки остаются нейтральными
+ * (--subtle, --muted).
+ *
+ * Шкала текста по убыванию контраста: --foreground → --muted-foreground →
+ * --dim (подписи) → --faint (шевроны, disabled).
+ */
+@layer base {
+  :root {
+    --app: 150 13% 94%;               /* #EEF2F0 — фон приложения за карточками */
+
+    --background: 150 13% 94%;        /* #EEF2F0 */
+    --foreground: 150 45% 9%;         /* #0C1F14 */
+
+    --card: 0 0% 100%;
+    --card-foreground: 150 45% 9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 150 45% 9%;
+
+    --primary: 131 66% 38%;           /* #21A038 — зелёный Сбера */
+    --primary-hover: 131 67% 32%;     /* #1B8A30 */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 140 20% 96%;         /* #F3F7F4 */
+    --secondary-foreground: 150 45% 9%;
+
+    --muted: 140 15% 95%;             /* #F0F4F1 */
+    --muted-foreground: 147 8% 39%;   /* #5C6B62 */
+
+    --dim: 147 8% 57%;                /* #8A9891 — третичный текст, подписи */
+    --faint: 147 12% 78%;             /* #C2CDC6 — шевроны, disabled */
+
+    --subtle: 150 27% 98%;            /* #F7FAF8 — поля ввода, строки списков */
+    --subtle-hover: 144 20% 95%;      /* #EFF5F1 */
+
+    --accent: 128 47% 94%;            /* #E8F6EA */
+    --accent-hover: 132 44% 89%;      /* #D8EFDD */
+    --accent-foreground: 133 70% 26%; /* #14732A */
+
+    --border: 140 12% 90%;            /* #E4EAE6 */
+    --input: 140 12% 90%;             /* #E4EAE6 */
+    --ring: 131 66% 38%;              /* #21A038 */
+
+    --positive: 133 70% 26%;          /* #14732A — «вам должны» */
+    --negative: 5 75% 45%;            /* #C62A1D — «вы должны» */
+
+    --negative-surface: 8 60% 97%;       /* #FDF4F3 — фон строки долга */
+    --negative-surface-hover: 10 55% 95%; /* #FBEBE9 */
+
+    --destructive: 5 75% 45%;         /* #C62A1D */
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 131 66% 38%;           /* #21A038 */
+    --success-foreground: 0 0% 100%;
+
+    --chart-muted: 132 42% 86%;       /* #CDE9D3 — неактивный столбик графика */
+
+    --radius: 0.75rem;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-app text-foreground antialiased;
+  }
+
+  /* Money must line up in columns, so every amount uses tabular figures. */
+  .tabular-nums-money {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+}
+
+@layer utilities {
+  /* Hides scrollbars on the horizontal filter rails without disabling scroll. */
+  .no-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}
