@@ -52,7 +52,7 @@ const DialogContent = React.forwardRef<
       {showCloseButton ? (
         <DialogPrimitive.Close
           aria-label="Закрыть"
-          className="absolute right-5 top-5 inline-flex size-10 shrink-0 items-center justify-center rounded-full bg-secondary text-muted-foreground transition-colors hover:bg-border hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none sm:right-8 sm:top-8"
+          className="absolute right-5 top-5 inline-flex size-11 shrink-0 items-center justify-center rounded-full bg-secondary text-muted-foreground transition-colors hover:bg-border hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none sm:right-8 sm:top-8"
         >
           <X className="size-[18px]" aria-hidden="true" />
           <span className="sr-only">Закрыть</span>

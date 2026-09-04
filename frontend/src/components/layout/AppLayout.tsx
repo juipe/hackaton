@@ -47,7 +47,8 @@ export function AppLayout() {
 
           <div className="lg:pl-[272px]">
             {/* Ширину не ограничиваем: макет 1440 без ограничителя, контент тянется. */}
-            <main className="flex w-full flex-col gap-6 px-4 py-5 pb-24 lg:pb-12 lg:pl-3 lg:pr-10 lg:pt-8">
+            {/* pb-40 clears the fixed FAB (bottom-20 + size-14 ≈ 136px) with headroom to spare. */}
+            <main className="flex w-full flex-col gap-6 px-4 py-5 pb-40 lg:pb-12 lg:pl-3 lg:pr-10 lg:pt-8">
               <Outlet />
             </main>
           </div>

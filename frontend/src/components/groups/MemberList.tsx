@@ -77,7 +77,7 @@ export function MemberList({ group, members, currentUserId }: MemberListProps) {
                   </Badge>
                   {isSelf ? <Badge variant="neutral">Вы</Badge> : null}
                 </div>
-                <p className="mt-0.5 truncate text-[13px] text-dim">
+                <p className="mt-0.5 break-words text-[13px] text-dim sm:truncate">
                   {member.user.email} · в группе с {formatDate(member.joined_at)}
                 </p>
               </div>
@@ -93,7 +93,7 @@ export function MemberList({ group, members, currentUserId }: MemberListProps) {
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="shrink-0 hover:bg-negative-surface hover:text-negative"
+                    className="h-11 shrink-0 hover:bg-negative-surface hover:text-negative"
                     disabled={removeMember.isPending}
                     aria-label={`Удалить участника из группы: ${member.user.name}`}
                   >
@@ -112,7 +112,7 @@ export function MemberList({ group, members, currentUserId }: MemberListProps) {
                   <Button
                     variant="outline"
                     size="sm"
-                    className="shrink-0"
+                    className="h-11 shrink-0"
                     disabled={removeMember.isPending}
                     aria-label={`Выйти из группы «${group.name}»`}
                   >

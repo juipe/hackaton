@@ -51,7 +51,7 @@ export function UserMenu({ variant = "compact", className }: UserMenuProps) {
             "flex items-center rounded-full transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
             variant === "full"
               ? "w-full min-w-0 gap-3 bg-card px-3.5 py-2.5 text-left shadow-flat hover:shadow-nav"
-              : "justify-center",
+              : "justify-center p-[3px]", // pads the 38px avatar up to a ~44px tap target
             className,
           )}
         >

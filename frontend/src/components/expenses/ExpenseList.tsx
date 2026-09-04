@@ -147,8 +147,8 @@ export function ExpenseList({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="no-scrollbar flex items-center gap-2 overflow-x-auto py-1 lg:flex-wrap lg:overflow-x-visible">
-        <label className="inline-flex h-[46px] w-[220px] shrink-0 items-center gap-2.5 rounded-full bg-card px-[18px] shadow-flat sm:w-[260px]">
+      <div className="no-scrollbar flex snap-x snap-proximity items-center gap-2 overflow-x-auto scroll-px-4 py-1 lg:flex-wrap lg:overflow-x-visible lg:snap-none">
+        <label className="inline-flex h-[46px] w-[220px] shrink-0 snap-start items-center gap-2.5 rounded-full bg-card px-[18px] shadow-flat sm:w-[260px]">
           <Search className="size-[18px] shrink-0 text-dim" aria-hidden="true" />
           <input
             type="search"
@@ -198,7 +198,7 @@ export function ExpenseList({
         {filtersActive ? (
           <Button
             variant="ghost"
-            className="h-[46px] shrink-0 px-4 text-[15px] font-medium text-dim hover:bg-transparent hover:text-foreground [&_svg]:size-[15px]"
+            className="h-[46px] shrink-0 snap-start px-4 text-[15px] font-medium text-dim hover:bg-transparent hover:text-foreground [&_svg]:size-[15px]"
             onClick={clearFilters}
           >
             <X strokeWidth={2.2} aria-hidden="true" />
@@ -345,7 +345,7 @@ function PeriodCapsule({
   return (
     <div
       className={cn(
-        "inline-flex h-[46px] shrink-0 items-center rounded-full transition-colors",
+        "inline-flex h-[46px] shrink-0 snap-start items-center rounded-full transition-colors",
         active ? "bg-accent text-accent-foreground" : "bg-card text-muted-foreground shadow-flat",
       )}
     >
@@ -445,7 +445,7 @@ function FilterCapsule({
   return (
     <div
       className={cn(
-        "inline-flex h-[46px] shrink-0 items-center rounded-full transition-colors",
+        "inline-flex h-[46px] shrink-0 snap-start items-center rounded-full transition-colors",
         active
           ? "bg-accent text-accent-foreground hover:bg-accent-hover"
           : "bg-card text-muted-foreground shadow-flat",

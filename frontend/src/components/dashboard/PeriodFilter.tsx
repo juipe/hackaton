@@ -70,7 +70,7 @@ export function PeriodFilter({
   return (
     <div className="w-full min-w-0 space-y-3 lg:w-auto">
       {/* На узком экране лента капсул уезжает вбок сама, а не растягивает страницу. */}
-      <div className="no-scrollbar -mx-1 overflow-x-auto px-1 py-1">
+      <div className="no-scrollbar -mx-1 snap-x snap-proximity overflow-x-auto scroll-px-1 px-1 py-1">
         <div
           role="group"
           aria-label="Период сводки"
@@ -86,7 +86,7 @@ export function PeriodFilter({
                 aria-label={option.label}
                 onClick={() => selectPeriod(option.value)}
                 className={cn(
-                  "inline-flex h-[38px] items-center gap-1.5 whitespace-nowrap rounded-full px-[18px] text-sm transition-colors",
+                  "inline-flex h-11 snap-start items-center gap-1.5 whitespace-nowrap rounded-full px-[18px] text-sm transition-colors",
                   active
                     ? "bg-primary font-bold text-primary-foreground"
                     : "font-medium text-muted-foreground hover:bg-secondary hover:text-foreground",

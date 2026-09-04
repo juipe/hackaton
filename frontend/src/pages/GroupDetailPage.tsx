@@ -352,21 +352,21 @@ export default function GroupDetailPage() {
       )}
 
       <Tabs value={tab} onValueChange={handleTabChange}>
-        <div className="no-scrollbar -my-1 overflow-x-auto py-1">
+        <div className="no-scrollbar -my-1 snap-x snap-mandatory overflow-x-auto scroll-px-4 py-1">
           <TabsList className="w-max">
-            <TabsTrigger value="balances">
+            <TabsTrigger value="balances" className="snap-start">
               <Scale aria-hidden="true" />
               Балансы
             </TabsTrigger>
-            <TabsTrigger value="expenses">
+            <TabsTrigger value="expenses" className="snap-start">
               <Banknote aria-hidden="true" />
               Расходы
             </TabsTrigger>
-            <TabsTrigger value="analytics">
+            <TabsTrigger value="analytics" className="snap-start">
               <BarChart3 aria-hidden="true" />
               Аналитика
             </TabsTrigger>
-            <TabsTrigger value="activity">
+            <TabsTrigger value="activity" className="snap-start">
               <ListChecks aria-hidden="true" />
               События
             </TabsTrigger>
