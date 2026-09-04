@@ -14,7 +14,8 @@ from app.schemas.dashboard import (
     DashboardSummaryOut,
     SpendingOverTimeOut,
 )
-from app.services import dashboard_service
+from app.schemas.saving_tips import SavingTipsOut
+from app.services import dashboard_service, saving_tips_service
 
 router = APIRouter(prefix="/dashboard", tags=["Сводка"])
 
@@ -90,6 +91,25 @@ def get_spending_over_time(
     group_id: GroupParam = None,
 ) -> SpendingOverTimeOut:
     return dashboard_service.spending_over_time(
+        db,
+        user=user,
+        period=period,
+        date_from=date_from,
+        date_to=date_to,
+        group_id=group_id,
+    )
+
+
+@router.post("/saving-tips", summary="Советы по экономии на основе расходов")
+def post_saving_tips(
+    db: DbSession,
+    user: CurrentUser,
+    period: PeriodParam = "all",
+    date_from: DateFromParam = None,
+    date_to: DateToParam = None,
+    group_id: GroupParam = None,
+) -> SavingTipsOut:
+    return saving_tips_service.generate(
         db,
         user=user,
         period=period,

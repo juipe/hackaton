@@ -1,10 +1,11 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 
 import { api } from "@/lib/api";
 import type {
   CategoryBreakdown,
   DashboardParams,
   DashboardSummary,
+  SavingTipsResponse,
   SpendingOverTime,
 } from "@/types/api";
 
@@ -46,5 +47,18 @@ export function useSpendingOverTime(params: DashboardParams = {}) {
     queryFn: () =>
       api.get<SpendingOverTime>("/dashboard/spending-over-time", toQuery(params)),
     enabled: isReady(params),
+  });
+}
+
+/**
+ * Generates AI saving tips for whatever period/group is currently selected on
+ * the dashboard — same params as the other queries above, no separate filter
+ * state. A mutation, not a query: it's triggered by a button click, not by
+ * the period changing, and each click may return a different set of tips.
+ */
+export function useGenerateSavingTips(params: DashboardParams = {}) {
+  return useMutation({
+    mutationFn: () =>
+      api.post<SavingTipsResponse>("/dashboard/saving-tips", undefined, toQuery(params)),
   });
 }

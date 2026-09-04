@@ -7,6 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 "Складчина" (Skladchina) — a shared-expense tracker (Splitwise-style), built for a Sberbank
 hackathon. FastAPI + PostgreSQL backend, React + TypeScript + Tailwind frontend. All UI text,
 demo data, and commit messages are in Russian; the service handles a single currency (RUB).
+It also has a voice-to-expense feature: record a note, get back a draft expense to confirm.
 
 ## Commands
 
@@ -109,14 +110,35 @@ ever lives in `localStorage`. Every group-scoped route depends on `require_membe
 
 Expense deletion is soft (`deleted_at`), so group history and the activity feed stay intact.
 
+#### Voice-to-expense pipeline (`services/voice_service.py`, `whisper_service.py`, `ollama_service.py`)
+
+`POST /groups/{group_id}/voice-expenses` (`api/routes/voice.py`) takes an audio upload and
+returns an ephemeral **draft** — it never writes to the database. The route handler is a sync
+`def`, not `async`, so FastAPI runs it in a threadpool: both Whisper transcription and the
+Ollama call are blocking. Pipeline: local Whisper transcription (`faster-whisper`, via
+`whisper_service.py`) → local Qwen structured extraction over Ollama (`ollama_service.py`,
+prompted to return JSON) → `voice_service.build_draft` resolves the extracted payer/participant
+names and category slug against the group's *real* members/categories (exact match, then
+substring/first-name match; ambiguous or no-match names come back as `ambiguous`/`unresolved`
+in the draft rather than being guessed at) and validates whatever split Qwen thought it heard.
+
+Split-total validation here never blocks the request — a mismatch only adds a `warnings` entry
+on the draft. The real safety net is the same one manual entry already has: `ExpenseForm` (via
+`split_engine` on submit) refuses to save an exact/percentage/shares split that doesn't add up,
+so a bad voice draft is caught by the same, already-tested path either way. Config knobs
+(`whisper_model`, `ollama_base_url`, `ollama_model`, `voice_max_upload_bytes`, etc.) live in
+`core/config.py`; in Docker, `OLLAMA_BASE_URL` defaults to `http://host.docker.internal:11434`
+since Ollama itself runs on the host, not in a container. No external AI API is ever called —
+both models run locally.
+
 ### Frontend (`frontend/src/`)
 
 - **`pages/`** — route-level screens, wired up in `routes.tsx`. Authenticated routes are nested
   under `RequireAuth` + `AppLayout` in `components/layout/`.
 - **`hooks/`** — one file per API resource (`useGroups.ts`, `useExpenses.ts`, `useBalances.ts`,
-  etc.), each a thin TanStack Query wrapper. There is no manual `useEffect(fetch...)` anywhere —
-  all server state goes through these hooks, and mutations invalidate the relevant query keys so
-  screens refresh themselves.
+  `useVoiceExpense.ts`, etc.), each a thin TanStack Query wrapper. There is no manual
+  `useEffect(fetch...)` anywhere — all server state goes through these hooks, and mutations
+  invalidate the relevant query keys so screens refresh themselves.
 - **`lib/api.ts`** — the only place that calls `fetch`. Handles the CSRF header, cookie-based
   auth, and error unwrapping (`ApiError`, `errorMessage()`). Route handlers/hooks should never
   call `fetch` directly.
@@ -124,7 +146,9 @@ Expense deletion is soft (`deleted_at`), so group history and the activity feed 
   rules for consistent display; the server is still the authority on calculated splits.
 - **`components/ui/`** — design-system primitives (button, dialog, tabs, etc.), built on Radix.
   **`components/common/`, `layout/`, `balances/`, `expenses/`, `groups/`, `dashboard/`, `charts/`**
-  — feature-grouped components.
+  — feature-grouped components. `expenses/VoiceExpenseDialog.tsx` records/uploads audio and
+  renders the returned draft (including any ambiguous/unresolved fields) into `ExpenseForm`
+  for the user to confirm before it's actually submitted.
 - **`types/api.ts`** — TypeScript types mirroring the backend's Pydantic schemas.
 
 Design tokens (colors, radii, shadows) live as CSS variables in `src/index.css` and as keys in
@@ -158,3 +182,10 @@ class that isn't in the config instead of erroring, so a new token has to be add
   `InterfaceError`). Use Postgres for real runs.
 - The CSRF cookie name is duplicated in two places that must stay in sync: `COOKIE_NAME` /
   `CSRF_COOKIE_NAME` (backend env) and the constant in `frontend/src/lib/api.ts`.
+- Voice expenses need Ollama running separately (`ollama serve`, with `ollama_model` pulled) —
+  it is not started by `docker compose up`. If Ollama is unreachable, the draft endpoint still
+  succeeds but returns an empty extraction with a `warnings` entry instead of failing outright.
+- Some `frontend/src/components/expenses/` files have stray compiled `.js`/`.d.ts` siblings
+  checked into git next to their `.tsx` source (e.g. `ExpenseForm.js`, `VoiceExpenseDialog.d.ts`)
+  — these are build artifacts, not sources. Always edit the `.tsx` file; ignore or delete the
+  `.js`/`.d.ts` siblings rather than editing them.

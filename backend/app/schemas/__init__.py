@@ -43,6 +43,13 @@ from app.schemas.invite import (
 )
 from app.schemas.member import MemberOut
 from app.schemas.payment import PaymentCreate, PaymentOut
+from app.schemas.saving_tips import (
+    SavingTip,
+    SavingTipsCategoryInput,
+    SavingTipsInput,
+    SavingTipsMonthInput,
+    SavingTipsOut,
+)
 from app.schemas.user import UserPublic
 from app.schemas.voice import (
     AmbiguousParticipant,
@@ -89,6 +96,11 @@ __all__ = [
     "PaymentOut",
     "RegisterIn",
     "ResolvedParticipant",
+    "SavingTip",
+    "SavingTipsCategoryInput",
+    "SavingTipsInput",
+    "SavingTipsMonthInput",
+    "SavingTipsOut",
     "SimplifyPreviewOut",
     "SimplifyRequest",
     "SpendingOverTimeOut",

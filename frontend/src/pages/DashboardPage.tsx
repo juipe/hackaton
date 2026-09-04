@@ -10,6 +10,7 @@ import { SectionCard } from "@/components/common/SectionCard";
 import { FirstRunCard } from "@/components/dashboard/FirstRunCard";
 import { GroupsOverview } from "@/components/dashboard/GroupsOverview";
 import { PeriodFilter } from "@/components/dashboard/PeriodFilter";
+import { SavingTipsCard } from "@/components/dashboard/SavingTipsCard";
 import { SummaryCards } from "@/components/dashboard/SummaryCards";
 import { Card } from "@/components/ui/card";
 import { useRecentActivity } from "@/hooks/useActivity";
@@ -108,25 +109,29 @@ export default function DashboardPage() {
         <GroupsOverview groups={summary?.groups} isLoading={summaryQuery.isLoading} />
 
         <div className="grid items-start gap-5 lg:grid-cols-2">
-          <SectionCard
-            className="min-w-0"
-            title="Куда ушли деньги"
-            description={`Все группы · ${periodLabel}`}
-            descriptionClassName="text-dim"
-          >
-            {categoryQuery.isError ? (
-              <ErrorState
-                error={categoryQuery.error}
-                onRetry={() => void categoryQuery.refetch()}
-              />
-            ) : (
-              <CategoryChart
-                data={categoryQuery.data}
-                currency={currency}
-                isLoading={categoryQuery.isLoading}
-              />
-            )}
-          </SectionCard>
+          <div className="flex min-w-0 flex-col gap-5">
+            <SectionCard
+              className="min-w-0"
+              title="Куда ушли деньги"
+              description={`Все группы · ${periodLabel}`}
+              descriptionClassName="text-dim"
+            >
+              {categoryQuery.isError ? (
+                <ErrorState
+                  error={categoryQuery.error}
+                  onRetry={() => void categoryQuery.refetch()}
+                />
+              ) : (
+                <CategoryChart
+                  data={categoryQuery.data}
+                  currency={currency}
+                  isLoading={categoryQuery.isLoading}
+                />
+              )}
+            </SectionCard>
+
+            <SavingTipsCard params={params} />
+          </div>
 
           <SectionCard
             className="min-w-0"

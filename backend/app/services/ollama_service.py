@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from app.core.config import settings
 from app.models.category import Category
+from app.schemas.saving_tips import SavingTipsInput, SavingTipsOut
 from app.schemas.voice import LLMExpenseExtraction
 
 _SYSTEM_PROMPT_TEMPLATE = """\
@@ -118,6 +119,52 @@ markdown, со следующими полями:
 """
 
 
+_SAVING_TIPS_SYSTEM_PROMPT = """\
+Ты финансовый ассистент приложения совместных расходов. Тебе дан JSON с
+расходами пользователя за выбранный период: общая сумма, число трат, валюта,
+разбивка по категориям (название, сумма, доля от общей суммы, число трат) и
+расходы по месяцам (месяц, сумма за месяц, доля пользователя за месяц).
+Никаких других данных о пользователе у тебя нет — это НЕ данные о долгах
+между участниками, а только сумма их собственных трат.
+
+Верни ТОЛЬКО JSON-объект без пояснений и без markdown, ровно такой формы:
+
+{"tips": [{"title": "...", "text": "...", "type": "data_driven"}, ...]}
+
+Правила:
+
+- Верни РОВНО 2 или РОВНО 3 совета — не больше и не меньше.
+- "type" — "data_driven", если совет опирается на конкретные цифры из
+  переданных данных, иначе "generic".
+- Никогда не выдумывай суммы, категории, проценты или тренды, которых нет в
+  данных. Каждое число в "text" должно быть взято из данных или быть их
+  прямым пересчётом (например, округлением процента).
+- Сравнение или тренд («выросли», «стало больше, чем в прошлом месяце»)
+  допустимы, только если в "months" есть хотя бы два месяца, позволяющих его
+  посчитать. Если месяц один или данных о месяцах нет — не говори об
+  изменении, росте или тренде.
+- Если категорий или месяцев мало для персональных выводов, часть советов
+  может быть общими рекомендациями по экономии (type "generic") — они не
+  должны звучать так, будто основаны на данных пользователя.
+- Каждый совет — короткий title (2-6 слов) и text (1-2 предложения) на
+  русском языке.
+
+## Примеры
+
+Данные: {"total_spending_cents": 500000, "expense_count": 12, "currency": "RUB",
+"categories": [{"name": "Еда", "amount_cents": 155000, "percentage": 31.0,
+"expense_count": 8}, {"name": "Аренда", "amount_cents": 250000,
+"percentage": 50.0, "expense_count": 1}], "months": [{"month": "2026-07",
+"amount_cents": 500000, "your_share_cents": 250000}]}
+{"tips": [{"title": "Аренда — крупнейшая категория", "text": "Аренда
+составляет 50% всех расходов за период.", "type": "data_driven"},
+{"title": "Еда — треть расходов", "text": "На еду уходит 31% всех трат —
+8 покупок за период.", "type": "data_driven"}, {"title": "Планируйте
+покупки заранее", "text": "Список покупок перед походом в магазин помогает
+избежать незапланированных трат.", "type": "generic"}]}
+"""
+
+
 class OllamaError(Exception):
     """Ollama was unreachable, or returned something that doesn't parse."""
 
@@ -157,4 +204,38 @@ def extract_expense(transcript: str, categories: Sequence[Category]) -> LLMExpen
         raise OllamaError(f"Модель вернула данные неожиданной формы: {exc}") from exc
 
 
-__all__ = ["OllamaError", "extract_expense"]
+def generate_saving_tips(data: SavingTipsInput) -> SavingTipsOut:
+    """2-3 saving tips from the trimmed spending data in ``data``.
+
+    Independent of :func:`extract_expense` — separate prompt, separate schema,
+    same Ollama call shape. Raises :class:`OllamaError` on any failure
+    (unreachable, bad JSON, wrong shape, wrong tip count) so the caller can
+    fall back to generic tips instead of breaking the dashboard.
+    """
+    base_url = settings.ollama_base_url.rstrip("/")
+    try:
+        response = httpx.post(
+            f"{base_url}/api/generate",
+            json={
+                "model": settings.ollama_model,
+                "system": _SAVING_TIPS_SYSTEM_PROMPT,
+                "prompt": data.model_dump_json(),
+                "format": "json",
+                "stream": False,
+                "think": False,
+            },
+            timeout=settings.ollama_timeout_seconds,
+        )
+        response.raise_for_status()
+        raw = response.json().get("response", "")
+        parsed = json.loads(raw)
+    except (httpx.HTTPError, json.JSONDecodeError) as exc:
+        raise OllamaError(f"Ollama недоступна или вернула некорректный ответ: {exc}") from exc
+
+    try:
+        return SavingTipsOut.model_validate(parsed)
+    except ValidationError as exc:
+        raise OllamaError(f"Модель вернула данные неожиданной формы: {exc}") from exc
+
+
+__all__ = ["OllamaError", "extract_expense", "generate_saving_tips"]

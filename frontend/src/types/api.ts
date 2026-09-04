@@ -257,6 +257,18 @@ export interface SpendingOverTime {
   items: SpendingOverTimePoint[];
 }
 
+export type SavingTipType = "data_driven" | "generic";
+
+export interface SavingTip {
+  title: string;
+  text: string;
+  type: SavingTipType;
+}
+
+export interface SavingTipsResponse {
+  tips: SavingTip[];
+}
+
 /* ---------------------------------- inputs --------------------------------- */
 
 export interface RegisterInput {
