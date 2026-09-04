@@ -358,8 +358,20 @@ export interface AmbiguousParticipant {
   candidates: Member[];
 }
 
+/**
+ * A participant matched unambiguously to a real member, with their share.
+ * `value` is `null` for an `equal` split or when the transcript never stated
+ * it; otherwise its unit follows the draft's `split_mode` exactly like
+ * `ParticipantInput.value` does for a manually entered expense: rubles for
+ * `exact`, a percentage for `percentage`, a share count for `shares`.
+ */
+export interface ResolvedParticipant {
+  member: Member;
+  value: string | null;
+}
+
 export interface ParticipantsResolution {
-  resolved: Member[];
+  resolved: ResolvedParticipant[];
   ambiguous: AmbiguousParticipant[];
   unresolved: string[];
 }
@@ -368,6 +380,7 @@ export interface ParticipantsResolution {
 export interface VoiceExpenseDraft {
   transcript: string;
   title: string | null;
+  description: string | null;
   amount_cents: number | null;
   occurred_at: IsoDateTime | null;
   split_mode: SplitMode;

@@ -98,7 +98,9 @@ export function ExpenseForm({
 
   const [draft, setDraft] = useState<Draft | null>(null);
   const [attempted, setAttempted] = useState(false);
-  const [showNote, setShowNote] = useState(Boolean(expense?.description));
+  const [showNote, setShowNote] = useState(
+    Boolean(expense?.description) || Boolean(voiceDraft?.description),
+  );
   const amountRef = useRef<HTMLInputElement>(null);
 
   const members = membersQuery.data;
@@ -132,23 +134,34 @@ export function ExpenseForm({
           ? voiceDraft.category.value.id
           : "";
       const resolvedParticipantIds = voiceDraft.participants.resolved.map(
-        (member) => member.user.id,
+        (participant) => participant.member.user.id,
       );
       const participantIds =
         payerId && !resolvedParticipantIds.includes(payerId)
           ? [...resolvedParticipantIds, payerId]
           : resolvedParticipantIds;
+      // The row inputs are edited as human-typed decimals with a comma, same
+      // as `rowsFromExpense` below — the API (and this draft) use a dot.
+      const rows: Record<string, string> =
+        voiceDraft.split_mode === "equal"
+          ? {}
+          : Object.fromEntries(
+              voiceDraft.participants.resolved.map((participant) => [
+                participant.member.user.id,
+                (participant.value ?? "").replace(".", ","),
+              ]),
+            );
       setDraft({
         amountText:
           voiceDraft.amount_cents !== null ? centsToInput(voiceDraft.amount_cents) : "",
         title: voiceDraft.title ?? "",
-        description: "",
+        description: voiceDraft.description ?? "",
         categoryId,
         dateValue: voiceDraft.occurred_at ? toDateInputValue(voiceDraft.occurred_at) : todayInputValue(),
         payerId,
         participantIds,
-        mode: "equal",
-        rows: {},
+        mode: voiceDraft.split_mode,
+        rows,
       });
       return;
     }

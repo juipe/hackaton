@@ -48,7 +48,9 @@ from app.schemas.voice import (
     AmbiguousParticipant,
     FieldResolution,
     LLMExpenseExtraction,
+    LLMParticipantShare,
     ParticipantsResolution,
+    ResolvedParticipant,
     VoiceExpenseDraftOut,
 )
 
@@ -76,6 +78,7 @@ __all__ = [
     "InviteOut",
     "InvitePreviewOut",
     "LLMExpenseExtraction",
+    "LLMParticipantShare",
     "LoginIn",
     "MemberOut",
     "MessageOut",
@@ -85,6 +88,7 @@ __all__ = [
     "PaymentCreate",
     "PaymentOut",
     "RegisterIn",
+    "ResolvedParticipant",
     "SimplifyPreviewOut",
     "SimplifyRequest",
     "SpendingOverTimeOut",

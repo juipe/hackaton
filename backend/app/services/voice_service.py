@@ -3,19 +3,30 @@
 Turns a recorded voice note into an ephemeral, validated expense draft: local
 Whisper transcription -> local Qwen extraction (via Ollama) -> resolution of
 payer, participants and category against the group's real members and
-categories. This module never writes to the database and never creates an
-expense — that only happens once the user confirms the draft through the
-existing expense creation flow (``expense_service.create_expense``).
+categories, plus validation of whatever split Qwen thought it heard. This
+module never writes to the database and never creates an expense — that only
+happens once the user confirms the draft through the existing expense
+creation flow (``expense_service.create_expense``).
+
+Split-total validation here never blocks the request — it only adds a
+``warnings`` entry. The actual safety net is the same one manual entry
+already has: ``ExpenseForm`` (via ``split_engine`` on submit) refuses to save
+an exact/percentage/shares split that doesn't add up, so a voice draft that
+got a number wrong is caught by the exact same, already-tested code path
+manual entry uses — never silently persisted, whether or not this module's
+own check happens to catch it.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
+from decimal import Decimal, InvalidOperation
 
 from sqlalchemy.orm import Session
 
 from app.core.errors import BadRequest
 from app.models.category import Category
+from app.models.expense import SplitMode
 from app.models.group import Group
 from app.models.member import GroupMember
 from app.models.user import User
@@ -26,7 +37,9 @@ from app.schemas.voice import (
     AmbiguousParticipant,
     FieldResolution,
     LLMExpenseExtraction,
+    LLMParticipantShare,
     ParticipantsResolution,
+    ResolvedParticipant,
     VoiceExpenseDraftOut,
 )
 from app.services import ollama_service, whisper_service
@@ -34,6 +47,8 @@ from app.utils.money import str_to_cents
 
 #: Words a speaker uses to refer to themself instead of naming who paid.
 _SELF_WORDS = {"я", "мне", "меня", "сам", "сама", "себя", "мной", "самим", "самой"}
+
+_SPLIT_MODES_BY_VALUE = {mode.value: mode for mode in SplitMode}
 
 
 def build_draft(
@@ -61,17 +76,38 @@ def build_draft(
         extraction = LLMExpenseExtraction()
         ollama_succeeded = False
 
+    split_mode = _resolve_split_mode(extraction.split_mode)
+    participants = _resolve_participants(extraction.participants, members, actor)
+
+    amount_cents = _resolve_amount(extraction.amount, warnings)
+    if amount_cents is None and split_mode == SplitMode.EXACT:
+        # "Саша 500, Максим 1000, я 1500" never states a total — it's the sum
+        # of the stated shares, not a guess, so this is safe to derive even
+        # though the rule elsewhere is never to invent a number.
+        amount_cents = _infer_amount_from_exact_shares(participants)
+
+    _validate_split(split_mode, amount_cents, participants.resolved, warnings)
+
     return VoiceExpenseDraftOut(
         transcript=transcript,
         title=(extraction.title or "").strip() or None,
-        amount_cents=_resolve_amount(extraction.amount, warnings),
+        description=(extraction.description or "").strip() or None,
+        amount_cents=amount_cents,
         occurred_at=_resolve_date(extraction.occurred_at, warnings),
-        split_mode="equal",
+        split_mode=split_mode,
         payer=_resolve_payer(extraction.payer_name, members, actor),
-        participants=_resolve_participants(extraction.participant_names, members),
+        participants=participants,
         category=_resolve_category(extraction.category_slug, categories, ollama_succeeded),
         warnings=warnings,
     )
+
+
+def _resolve_split_mode(raw: str | None) -> SplitMode:
+    if raw:
+        mode = _SPLIT_MODES_BY_VALUE.get(raw.strip().casefold())
+        if mode is not None:
+            return mode
+    return SplitMode.EQUAL
 
 
 def _resolve_amount(raw: str | None, warnings: list[str]) -> int | None:
@@ -92,6 +128,18 @@ def _resolve_date(raw: str | None, warnings: list[str]) -> datetime | None:
         return datetime.combine(parsed_date, datetime.min.time(), tzinfo=UTC)
     except ValueError:
         warnings.append("Не удалось распознать дату")
+        return None
+
+
+def _parse_decimal(raw: str | None) -> Decimal | None:
+    if not raw:
+        return None
+    cleaned = raw.strip().replace(",", ".").replace("%", "").replace(" ", "")
+    if not cleaned:
+        return None
+    try:
+        return Decimal(cleaned)
+    except InvalidOperation:
         return None
 
 
@@ -135,22 +183,31 @@ def _resolve_payer(
 
 
 def _resolve_participants(
-    raw_names: list[str], members: list[GroupMember]
+    items: list[LLMParticipantShare], members: list[GroupMember], actor: User
 ) -> ParticipantsResolution:
-    resolved: list[MemberOut] = []
+    resolved: list[ResolvedParticipant] = []
     resolved_ids: set = set()
     ambiguous: list[AmbiguousParticipant] = []
     unresolved: list[str] = []
 
-    for raw_name in raw_names:
-        raw = raw_name.strip()
+    for item in items:
+        raw = item.name.strip()
         if not raw:
             continue
-        matches = _match_members(raw, members)
+        value = (item.value or "").strip() or None
+
+        if raw.casefold() in _SELF_WORDS:
+            actor_member = next((m for m in members if m.user_id == actor.id), None)
+            matches = [actor_member] if actor_member is not None else []
+        else:
+            matches = _match_members(raw, members)
+
         if len(matches) == 1:
             member = matches[0]
             if member.id not in resolved_ids:
-                resolved.append(MemberOut.model_validate(member))
+                resolved.append(
+                    ResolvedParticipant(member=MemberOut.model_validate(member), value=value)
+                )
                 resolved_ids.add(member.id)
         elif matches:
             ambiguous.append(
@@ -193,6 +250,101 @@ def _resolve_category(
             )
 
     return FieldResolution[CategoryOut](status="unresolved", raw_text=raw_slug or None)
+
+
+def _infer_amount_from_exact_shares(participants: ParticipantsResolution) -> int | None:
+    if participants.ambiguous or participants.unresolved or not participants.resolved:
+        return None
+    try:
+        cents = [str_to_cents(rp.value) for rp in participants.resolved if rp.value is not None]
+    except ValueError:
+        return None
+    if len(cents) != len(participants.resolved):
+        return None
+    return sum(cents)
+
+
+def _validate_split(
+    split_mode: SplitMode,
+    amount_cents: int | None,
+    resolved: list[ResolvedParticipant],
+    warnings: list[str],
+) -> None:
+    """Never corrects anything — only tells the user, via ``warnings``, that
+    the numbers Qwen heard don't add up, so they know to check the
+    confirmation form before saving rather than trusting it blindly."""
+    if split_mode == SplitMode.EXACT:
+        _validate_exact(amount_cents, resolved, warnings)
+    elif split_mode == SplitMode.PERCENTAGE:
+        _validate_percentage(resolved, warnings)
+    elif split_mode == SplitMode.SHARES:
+        _validate_shares(resolved, warnings)
+
+
+def _validate_exact(
+    amount_cents: int | None, resolved: list[ResolvedParticipant], warnings: list[str]
+) -> None:
+    if not resolved:
+        return
+    cents: list[int] = []
+    for participant in resolved:
+        if participant.value is None:
+            warnings.append(
+                "Не для всех участников распознана сумма при точном делении — "
+                "проверьте и укажите вручную"
+            )
+            return
+        try:
+            cents.append(str_to_cents(participant.value))
+        except ValueError:
+            warnings.append(
+                "Не удалось распознать одну из сумм участников — проверьте деление ниже"
+            )
+            return
+    if amount_cents is None:
+        return
+    total = sum(cents)
+    if total != amount_cents:
+        warnings.append(
+            "Суммы участников не совпадают с общей суммой расхода — "
+            "проверьте и поправьте деление ниже"
+        )
+
+
+def _validate_percentage(resolved: list[ResolvedParticipant], warnings: list[str]) -> None:
+    if not resolved:
+        return
+    total = Decimal(0)
+    for participant in resolved:
+        value = _parse_decimal(participant.value)
+        if value is None:
+            warnings.append(
+                "Не для всех участников распознан процент — проверьте и укажите вручную"
+            )
+            return
+        total += value
+    if total != Decimal(100):
+        warnings.append(
+            f"Проценты участников в сумме дают {total}%, а не 100% — "
+            "проверьте и поправьте деление ниже"
+        )
+
+
+def _validate_shares(resolved: list[ResolvedParticipant], warnings: list[str]) -> None:
+    if not resolved:
+        return
+    total = Decimal(0)
+    for participant in resolved:
+        value = _parse_decimal(participant.value)
+        if value is None or value <= 0:
+            warnings.append(
+                "Не все доли участников удалось распознать как положительные числа — "
+                "проверьте и укажите вручную"
+            )
+            return
+        total += value
+    if total <= 0:
+        warnings.append("Сумма долей участников должна быть больше нуля — проверьте деление ниже")
 
 
 __all__ = ["build_draft"]
