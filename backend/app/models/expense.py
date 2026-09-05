@@ -119,7 +119,11 @@ class ExpenseSplit(Base):
         index=True,
     )
     split_mode: Mapped[str] = mapped_column(String(16), nullable=False)
-    input_value: Mapped[Decimal | None] = mapped_column(Numeric(12, 6), nullable=True)
+    # For "exact" mode this holds the raw cents amount, so its range has to match
+    # calculated_amount_cents (BigInteger, up to 19 digits) — not just the small
+    # percentage/share values the other modes store here. Scale 6 is kept for
+    # percentage's fractional precision.
+    input_value: Mapped[Decimal | None] = mapped_column(Numeric(25, 6), nullable=True)
     calculated_amount_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
     expense: Mapped[Expense] = relationship(back_populates="splits")

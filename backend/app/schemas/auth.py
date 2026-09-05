@@ -11,11 +11,15 @@ from pydantic import (
     Field,
     StringConstraints,
     field_validator,
+    model_validator,
 )
 
 NAME_MAX_LENGTH = 120
 PASSWORD_MIN_LENGTH = 8
 PASSWORD_MAX_LENGTH = 128
+#: A sanity ceiling, not a product limit — keeps a fat-fingered value from
+#: quietly turning into a threshold nobody could ever cross (or already has).
+MONTHLY_BUDGET_MAX_CENTS = 10_000_000_000  # 100 000 000 ₽
 
 NAME_DESCRIPTION = "Имя — до 120 символов"
 EMAIL_DESCRIPTION = "Адрес электронной почты"
@@ -108,10 +112,32 @@ class LoginIn(_EmailBody):
 
 
 class UpdateMeIn(_EmailBody):
-    """Частичное изменение профиля. Пропущенное поле остаётся как было."""
+    """Частичное изменение профиля. Пропущенное поле остаётся как было.
+
+    ``monthly_budget_cents`` is different from ``name``/``email``: ``null`` is a
+    meaningful value (turns the critical-budget check off), so "not sent" and
+    "sent as null" must be told apart — see ``model_fields_set`` at the call site.
+    """
 
     name: NameField | None = Field(default=None, description=NAME_DESCRIPTION)
     email: EmailStr | None = Field(default=None, description=EMAIL_DESCRIPTION)
+    monthly_budget_cents: int | None = Field(
+        default=None,
+        description="Располагаемый бюджет/доход в месяц, в копейках — необязательное поле",
+    )
+
+    @model_validator(mode="after")
+    def _validate_budget(self) -> UpdateMeIn:
+        if "monthly_budget_cents" not in self.model_fields_set:
+            return self
+        value = self.monthly_budget_cents
+        if value is None:
+            return self
+        if value <= 0:
+            raise ValueError("Бюджет должен быть больше нуля")
+        if value > MONTHLY_BUDGET_MAX_CENTS:
+            raise ValueError("Указана слишком большая сумма бюджета")
+        return self
 
 
 class ChangePasswordIn(BaseModel):

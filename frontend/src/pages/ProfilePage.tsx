@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/useAuth";
 import { api, errorMessage } from "@/lib/api";
+import { centsToInput, currencySymbol, parseAmountToCents } from "@/lib/money";
 import type { UserPublic } from "@/types/api";
 
 const profileSchema = z.object({
@@ -28,6 +29,17 @@ const profileSchema = z.object({
     .string()
     .min(1, "Введите адрес электронной почты")
     .email("Похоже, это не адрес электронной почты"),
+  monthlyBudget: z
+    .string()
+    .trim()
+    .refine(
+      (value) => value === "" || parseAmountToCents(value) !== null,
+      "Введите сумму числом",
+    )
+    .refine(
+      (value) => value === "" || (parseAmountToCents(value) ?? 0) > 0,
+      "Бюджет должен быть больше нуля",
+    ),
 });
 
 type ProfileValues = z.infer<typeof profileSchema>;
@@ -56,7 +68,11 @@ export default function ProfilePage() {
 
   const profileForm = useForm<ProfileValues>({
     resolver: zodResolver(profileSchema),
-    defaultValues: { name: user?.name ?? "", email: user?.email ?? "" },
+    defaultValues: {
+      name: user?.name ?? "",
+      email: user?.email ?? "",
+      monthlyBudget: centsToInput(user?.monthly_budget_cents ?? null),
+    },
   });
   const passwordForm = useForm<PasswordValues>({
     resolver: zodResolver(passwordSchema),
@@ -66,19 +82,26 @@ export default function ProfilePage() {
   const { reset: resetProfileForm } = profileForm;
   const profileName = user?.name;
   const profileEmail = user?.email;
+  const profileMonthlyBudgetCents = user?.monthly_budget_cents ?? null;
 
   // The server is the authority on the saved values, so re-seed the form from the
   // refreshed session rather than from what was typed.
   useEffect(() => {
     if (profileName === undefined || profileEmail === undefined) return;
-    resetProfileForm({ name: profileName, email: profileEmail });
-  }, [profileName, profileEmail, resetProfileForm]);
+    resetProfileForm({
+      name: profileName,
+      email: profileEmail,
+      monthlyBudget: centsToInput(profileMonthlyBudgetCents),
+    });
+  }, [profileName, profileEmail, profileMonthlyBudgetCents, resetProfileForm]);
 
   const updateProfile = useMutation({
     mutationFn: (values: ProfileValues) =>
       api.patch<UserPublic>("/auth/me", {
         name: values.name,
         email: values.email.trim().toLowerCase(),
+        monthly_budget_cents:
+          values.monthlyBudget.trim() === "" ? null : parseAmountToCents(values.monthlyBudget),
       }),
   });
 
@@ -200,6 +223,44 @@ export default function ProfilePage() {
               )}
             </div>
 
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="profile-monthly-budget">
+                Располагаемый бюджет в месяц (необязательно)
+              </Label>
+              <div className="relative">
+                <Input
+                  id="profile-monthly-budget"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  placeholder="0,00"
+                  aria-invalid={profileErrors.monthlyBudget ? true : undefined}
+                  aria-describedby={
+                    profileErrors.monthlyBudget
+                      ? "profile-monthly-budget-error"
+                      : "profile-monthly-budget-hint"
+                  }
+                  className="pr-12 tabular-nums-money"
+                  {...profileForm.register("monthlyBudget")}
+                />
+                <span className="pointer-events-none absolute inset-y-0 right-[18px] flex items-center text-base font-semibold text-dim">
+                  {currencySymbol()}
+                </span>
+              </div>
+              {profileErrors.monthlyBudget ? (
+                <p id="profile-monthly-budget-error" className="text-[13px] text-destructive">
+                  {profileErrors.monthlyBudget.message}
+                </p>
+              ) : (
+                <p
+                  id="profile-monthly-budget-hint"
+                  className="text-[13px] leading-relaxed text-dim"
+                >
+                  Если долг по всем группам приблизится к этой сумме или превысит её, придёт
+                  уведомление. Оставьте пустым, чтобы отключить эту проверку.
+                </p>
+              )}
+            </div>
+
             <div className="flex flex-wrap items-center gap-2">
               <Button
                 type="submit"
@@ -217,7 +278,13 @@ export default function ProfilePage() {
                 <Button
                   type="button"
                   variant="ghost"
-                  onClick={() => resetProfileForm({ name: user.name, email: user.email })}
+                  onClick={() =>
+                    resetProfileForm({
+                      name: user.name,
+                      email: user.email,
+                      monthlyBudget: centsToInput(user.monthly_budget_cents ?? null),
+                    })
+                  }
                 >
                   Отменить
                 </Button>

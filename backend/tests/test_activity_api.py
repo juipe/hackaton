@@ -75,6 +75,7 @@ def test_new_group_has_a_single_group_created_entry(
         "id": str(owner_id),
         "name": "Ada Byron",
         "email": owner_email,
+        "monthly_budget_cents": None,
     }
     assert isinstance(entry["meta"], dict)
     created_at = datetime.fromisoformat(entry["created_at"])

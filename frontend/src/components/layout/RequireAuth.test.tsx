@@ -7,7 +7,12 @@ import { errorResponse, jsonResponse, stubFetch } from "@/test/fetch";
 import { renderWithProviders } from "@/test/render";
 import type { UserPublic } from "@/types/api";
 
-const OLYA: UserPublic = { id: "user-1", name: "Оля", email: "olya@skladchina.ru" };
+const OLYA: UserPublic = {
+  id: "user-1",
+  name: "Оля",
+  email: "olya@skladchina.ru",
+  monthly_budget_cents: null,
+};
 
 /** Подменяет экран входа, чтобы можно было проверить адрес возврата. */
 function LoginProbe() {

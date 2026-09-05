@@ -52,7 +52,12 @@ def read_me(user: CurrentUser) -> UserPublic:
 @router.patch("/me", summary="Изменить профиль")
 def update_me(payload: UpdateMeIn, user: CurrentUser, db: DbSession) -> UserPublic:
     updated = auth_service.update_profile(
-        db, user=user, name=payload.name, email=payload.email
+        db,
+        user=user,
+        name=payload.name,
+        email=payload.email,
+        monthly_budget_cents=payload.monthly_budget_cents,
+        fields_set=payload.model_fields_set,
     )
     return UserPublic.model_validate(updated)
 

@@ -36,11 +36,12 @@ class DebtReminderOut(BaseModel):
 
 class NotificationOut(ORMModel):
     id: uuid.UUID
-    group_id: uuid.UUID
-    group_name: str
-    expense_id: uuid.UUID
-    expense_title: str
-    payer_name: str
+    type: str
+    group_id: uuid.UUID | None = None
+    group_name: str | None = None
+    expense_id: uuid.UUID | None = None
+    expense_title: str | None = None
+    payer_name: str | None = None
     amount_due_cents: int
     currency: str
     message: str

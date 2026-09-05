@@ -197,7 +197,12 @@ def test_balances_and_transfers_embed_user_objects(
         splits=[(alice, 4000), (bob, 4000), (carol, 4000)],
     )
     expected = {
-        str(user.id): {"id": str(user.id), "name": user.name, "email": user.email}
+        str(user.id): {
+            "id": str(user.id),
+            "name": user.name,
+            "email": user.email,
+            "monthly_budget_cents": None,
+        }
         for user in (alice, bob, carol)
     }
 

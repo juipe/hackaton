@@ -25,6 +25,7 @@ from app.models.user import User
 from app.repositories import category_repo, expense_repo, group_repo
 from app.schemas.expense import ExpenseOut, ExpensePage, ParticipantIn, SplitOut
 from app.services.activity_service import log_activity
+from app.services.budget_threshold_service import check_and_notify_many
 from app.services.debt_reminder_service import create_reminders_for_expense
 from app.services.split_engine import SplitInput, SplitResult, compute_splits
 from app.utils.time import ensure_utc, utcnow
@@ -157,6 +158,16 @@ def create_expense(
     # recomputation, no second opinion on who owes what.
     create_reminders_for_expense(db, expense=expense, group=group, results=results)
     db.commit()
+
+    # Only debtors' cross-group exposure can have grown from this expense — the
+    # payer's net can only improve. Runs after commit so the check reads the
+    # transaction it is reacting to.
+    debtor_ids = [
+        result.user_id
+        for result in results
+        if result.user_id != paid_by and result.calculated_amount_cents > 0
+    ]
+    check_and_notify_many(db, debtor_ids)
     return expense
 
 

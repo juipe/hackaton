@@ -16,6 +16,7 @@ function withAuthStub(handler: (url: string) => Response | Promise<Response>) {
 function makeNotification(overrides: Partial<Notification> = {}): Notification {
   return {
     id: "notif-1",
+    type: "debt_reminder",
     group_id: "group-1",
     group_name: "Квартира на Вайнера",
     expense_id: "expense-1",

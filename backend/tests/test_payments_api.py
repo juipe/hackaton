@@ -96,8 +96,18 @@ def test_record_payment_returns_both_users_and_group_currency(
     assert body["group_id"] == str(group.id)
     assert body["from_user_id"] == str(bob.id)
     assert body["to_user_id"] == str(alice.id)
-    assert body["from_user"] == {"id": str(bob.id), "name": bob.name, "email": bob.email}
-    assert body["to_user"] == {"id": str(alice.id), "name": alice.name, "email": alice.email}
+    assert body["from_user"] == {
+        "id": str(bob.id),
+        "name": bob.name,
+        "email": bob.email,
+        "monthly_budget_cents": None,
+    }
+    assert body["to_user"] == {
+        "id": str(alice.id),
+        "name": alice.name,
+        "email": alice.email,
+        "monthly_budget_cents": None,
+    }
     assert body["amount_cents"] == 4000
     assert body["currency"] == "RUB"
     assert body["note"] == "bank transfer"

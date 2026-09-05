@@ -83,14 +83,24 @@ def iter_cents_fields(node: Any, path: str = "") -> Iterator[tuple[str, Any]]:
             yield from iter_cents_fields(value, f"{path}[{index}]")
 
 
+#: ``*_cents`` fields that are allowed to be ``null`` — a deliberately optional
+#: user setting, not a monetary computation. See ``User.monthly_budget_cents``
+#: and ``app.services.budget_threshold_service``.
+NULLABLE_CENTS_FIELDS = {"monthly_budget_cents"}
+
+
 def assert_cents_are_ints(payload: Any, label: str) -> int:
     """Every ``*_cents`` value in ``payload`` must be a plain ``int``. Returns the count.
 
     ``type(...) is int`` rather than ``isinstance``: ``bool`` is a subclass of ``int``
-    and ``true`` is not a monetary value either.
+    and ``true`` is not a monetary value either. The one exception is
+    ``NULLABLE_CENTS_FIELDS``, where ``None`` is a legitimate "not configured".
     """
     checked = 0
     for path, value in iter_cents_fields(payload):
+        key = path.rsplit(".", 1)[-1]
+        if value is None and key in NULLABLE_CENTS_FIELDS:
+            continue
         assert type(value) is int, (
             f"{label}{path} is {type(value).__name__} ({value!r}), not an int"
         )

@@ -17,6 +17,7 @@ const OLYA: UserPublic = {
   id: "user-1",
   name: "Оля",
   email: "olya@skladchina.ru",
+  monthly_budget_cents: null,
 };
 
 /** A minimal consumer: it only reports what `useAuth` says and lets us act on it. */

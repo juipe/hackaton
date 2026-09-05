@@ -59,6 +59,7 @@ export function makeUser(overrides: Partial<UserPublic> = {}): UserPublic {
     id,
     name,
     email,
+    monthly_budget_cents: null,
     ...overrides,
   };
 }

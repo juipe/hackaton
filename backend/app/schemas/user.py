@@ -11,6 +11,7 @@ class UserPublic(ORMModel):
     id: uuid.UUID
     name: str
     email: str
+    monthly_budget_cents: int | None = None
 
 
 __all__ = ["UserPublic"]

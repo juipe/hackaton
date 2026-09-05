@@ -37,6 +37,7 @@ export interface UserPublic {
   id: Uuid;
   name: string;
   email: string;
+  monthly_budget_cents: number | null;
 }
 
 export interface Category {
@@ -269,13 +270,16 @@ export interface SavingTipsResponse {
   tips: SavingTip[];
 }
 
+export type NotificationType = "debt_reminder" | "budget_threshold";
+
 export interface Notification {
   id: Uuid;
-  group_id: Uuid;
-  group_name: string;
-  expense_id: Uuid;
-  expense_title: string;
-  payer_name: string;
+  type: NotificationType;
+  group_id: Uuid | null;
+  group_name: string | null;
+  expense_id: Uuid | null;
+  expense_title: string | null;
+  payer_name: string | null;
   amount_due_cents: number;
   currency: string;
   message: string;

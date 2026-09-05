@@ -37,9 +37,21 @@ def authenticate(db: Session, *, email: str, password: str) -> User:
 
 
 def update_profile(
-    db: Session, *, user: User, name: str | None = None, email: str | None = None
+    db: Session,
+    *,
+    user: User,
+    name: str | None = None,
+    email: str | None = None,
+    monthly_budget_cents: int | None = None,
+    fields_set: frozenset[str] = frozenset(),
 ) -> User:
-    """Apply the supplied profile fields. ``None`` means "leave as it is"."""
+    """Apply the supplied profile fields.
+
+    For ``name``/``email``, ``None`` means "leave as it is" — neither field can
+    legitimately be cleared. ``monthly_budget_cents`` is different: ``null`` is
+    a meaningful value (turns the threshold check off), so it is only touched
+    when the caller actually sent it — see ``fields_set``.
+    """
     if name is not None:
         user.name = name
     if email is not None and email != user.email:
@@ -47,6 +59,12 @@ def update_profile(
         if owner is not None and owner.id != user.id:
             raise Conflict(_EMAIL_TAKEN)
         user.email = email
+    if "monthly_budget_cents" in fields_set and monthly_budget_cents != user.monthly_budget_cents:
+        user.monthly_budget_cents = monthly_budget_cents
+        # The limit changed (or was cleared): the old approaching/exceeded state
+        # no longer describes anything real, so drop it rather than let a lower
+        # limit re-trigger "approaching" against a debt that was already there.
+        user.budget_alert_state = None
     _commit_unique_email(db)
     return user
 

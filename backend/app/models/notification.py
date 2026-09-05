@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 
 class Notification(Base):
-    """A debt reminder for one debtor on one expense.
+    """A notification for one user — a debt reminder by default.
 
     Every display field (``expense_title``, ``payer_name``, ``group_name``,
     ``amount_due_cents``) is a snapshot taken when the expense was committed,
@@ -33,6 +33,11 @@ class Notification(Base):
     by a Qwen-generated one in the background (see
     ``app.services.debt_reminder_service``); either way the row exists — and
     is visible once ``available_at`` passes — the instant the expense commits.
+
+    ``type`` distinguishes this from other notification kinds sharing the same
+    table/API/UI — see ``app.services.budget_threshold_service`` for the
+    "critical budget" kind, which has no single expense/payer/group to anchor
+    to and so leaves those columns null.
     """
 
     __tablename__ = "notifications"
@@ -47,21 +52,22 @@ class Notification(Base):
         nullable=False,
         index=True,
     )
-    expense_id: Mapped[uuid.UUID] = mapped_column(
+    type: Mapped[str] = mapped_column(String(24), nullable=False, default="debt_reminder")
+    expense_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("expenses.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
         index=True,
     )
-    group_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("groups.id", ondelete="CASCADE"), nullable=False
+    group_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("groups.id", ondelete="CASCADE"), nullable=True
     )
-    payer_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    payer_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True
     )
-    expense_title: Mapped[str] = mapped_column(String(160), nullable=False)
-    payer_name: Mapped[str] = mapped_column(String(120), nullable=False)
-    group_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    expense_title: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    payer_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    group_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     amount_due_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="RUB")
     message: Mapped[str] = mapped_column(Text, nullable=False)
@@ -78,7 +84,7 @@ class Notification(Base):
     )
 
     user: Mapped[User] = relationship(foreign_keys=[user_id])
-    payer: Mapped[User] = relationship(foreign_keys=[payer_id])
+    payer: Mapped[User | None] = relationship(foreign_keys=[payer_id])
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"<Notification user={self.user_id} expense={self.expense_id}>"

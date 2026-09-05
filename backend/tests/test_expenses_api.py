@@ -182,6 +182,51 @@ def test_exact_split_stores_each_amount(
     assert {split["split_mode"] for split in body["splits"]} == {"exact"}
 
 
+def test_input_value_column_is_wide_enough_for_cents() -> None:
+    """SQLite (the test DB) doesn't enforce ``NUMERIC`` precision, so the API-level
+    large-amount test above can't reproduce the real Postgres overflow on its own.
+    This pins the column definition itself: it must have enough integer digits to
+    hold any ``BigInteger`` cents value, not just a percentage or a share count.
+    """
+    numeric = ExpenseSplit.__table__.c.input_value.type
+    assert (numeric.precision, numeric.scale) == (25, 6)
+
+
+def test_exact_split_supports_large_cent_amounts(
+    api_client: Callable[[User], TestClient],
+    people: tuple[User, User, User],
+    group: Group,
+    food: Category,
+) -> None:
+    """Regression: ``expense_splits.input_value`` used to be ``NUMERIC(12, 6)``,
+    which only leaves 6 integer digits — an "exact" split stores the raw cents
+    amount here, so anything at or above 1 000 000 cents overflowed the column
+    and the request 500'd. See ``expense_splits.input_value`` migration
+    ``0004_widen_input_value``.
+    """
+    ada, ben, cleo = people
+    client = api_client(ada)
+
+    response = client.post(
+        f"/api/groups/{group.id}/expenses",
+        json=_payload(
+            category=food,
+            paid_by=ada,
+            amount_cents=34_000_000,
+            participants=[(ada, 34_000_000), (ben, 0), (cleo, 0)],
+            split_mode="exact",
+        ),
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    _assert_balanced(body)
+    assert _shares_by_user(body)[str(ada.id)] == 34_000_000
+    assert {split["input_value"] for split in body["splits"] if split["user_id"] == str(ada.id)} == {
+        "34000000"
+    }
+
+
 def test_exact_split_must_match_the_total(
     api_client: Callable[[User], TestClient],
     people: tuple[User, User, User],

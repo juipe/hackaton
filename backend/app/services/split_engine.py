@@ -19,8 +19,10 @@ from app.models.expense import SplitMode
 _ZERO = Decimal(0)
 _HUNDRED = Decimal(100)
 
-# Weights carry at most 12 significant digits (``Numeric(12, 6)``) and amounts stay
-# far inside 10**15 cents, so 60 digits gives the intermediate quotients much more
+# Weights carry at most 25 significant digits (``Numeric(25, 6)`` — wide enough for
+# an "exact" input_value to hold a whole BigInteger cents amount, not just a
+# percentage or a share count) and amounts stay far inside 10**15 cents, so 60
+# digits gives the intermediate quotients much more
 # precision than the remainder ordering can ever need. Pinning it in a local context
 # also keeps the result independent of whatever precision the caller runs under.
 _PRECISION = 60

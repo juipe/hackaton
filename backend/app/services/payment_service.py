@@ -19,6 +19,7 @@ from app.models.payment import Payment
 from app.models.user import User
 from app.repositories import group_repo, payment_repo, user_repo
 from app.services.activity_service import log_activity
+from app.services.budget_threshold_service import check_and_notify_many
 from app.utils.time import ensure_utc, utcnow
 
 
@@ -89,6 +90,11 @@ def record_payment(
     )
 
     db.commit()
+
+    # Only the receiver's cross-group exposure can have grown from this payment
+    # (an overpayment can push their net negative); the sender's net can only
+    # improve. Runs after commit so the check reads the transaction it reacts to.
+    check_and_notify_many(db, [to_user_id])
     return payment
 
 
