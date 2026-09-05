@@ -164,7 +164,21 @@ Afterwards, `enhance_with_qwen` runs as a `BackgroundTasks` job (its own DB sess
 request's is already closed) and best-effort replaces the fallback message with one worded by
 Qwen via `ollama_service.generate_debt_reminder`; failure is silently swallowed and the
 deterministic fallback stands. `source` (`"fallback"` vs `"qwen"`) records which path won but
-isn't exposed over the API.
+isn't exposed over the API. `ollama_service.generate_debt_reminder` doesn't trust a
+JSON-valid response either: it re-checks the message is a short, clean sentence that actually
+contains the money amount (rendered exactly as `utils/money.format_money` renders it), the
+expense title, the group name and the payer, and raises `OllamaError` (→ fallback) otherwise.
+
+#### Critical budget-threshold alerts (`services/budget_threshold_service.py`)
+
+A third, separate use of the shared `Notification` table (`type="budget_threshold"`), unrelated
+to `debt_reminder_service` despite the shared model. Warns a user when their *cross-group* "you
+owe" total nears or passes the monthly budget they set on their profile. It never computes a
+balance itself — `balance_service.compute_user_group_nets` is the single source of truth.
+Dedup is a two-state machine (`User.budget_alert_state`), not a table: a notification fires only
+on a state change, so repeated expenses above the threshold don't spam. Called after commit
+from `expense_service` / `payment_service`, only for users whose debt the transaction could have
+*increased*. These rows have no single expense/payer/group, so those columns stay null.
 
 ### Frontend (`frontend/src/`)
 

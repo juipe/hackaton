@@ -51,8 +51,9 @@ def _fallback_message(
     *, payer_name: str, amount_due_cents: int, currency: str, expense_title: str, group_name: str
 ) -> str:
     return (
-        f"Вы должны {payer_name} {format_money(amount_due_cents, currency)} "
-        f"за «{expense_title}» в группе «{group_name}»."
+        f"Пожалуйста, не забудьте: вы должны {payer_name} "
+        f"{format_money(amount_due_cents, currency)} "
+        f"за «{expense_title}» в группе «{group_name}». 🙏"
     )
 
 

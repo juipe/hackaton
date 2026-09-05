@@ -17,6 +17,7 @@ from app.models.category import Category
 from app.schemas.notification import DebtReminderInput, DebtReminderOut
 from app.schemas.saving_tips import SavingTipsInput, SavingTipsOut
 from app.schemas.voice import LLMExpenseExtraction
+from app.utils.money import format_money, str_to_cents
 
 _SYSTEM_PROMPT_TEMPLATE = """\
 Ты извлекаешь структурированные данные о расходе из русской речи для
@@ -336,6 +337,58 @@ def generate_saving_tips(data: SavingTipsInput) -> SavingTipsOut:
         raise OllamaError(f"Модель вернула данные неожиданной формы: {exc}") from exc
 
 
+#: The prompt asks for "не длиннее 20 слов"; this leaves some slack before
+#: rejecting rather than enforcing that exact number.
+_DEBT_REMINDER_MAX_WORDS = 30
+_DEBT_REMINDER_MAX_LENGTH = 320
+#: Markdown/JSON/meta-text fragments that have leaked into a raw model answer
+#: in practice (e.g. a trailing "}"}** ❌ (Too long and contains errors) ->"
+#: after the actual sentence) — a clean one-sentence reminder never needs any
+#: of these.
+_DEBT_REMINDER_FORBIDDEN_SUBSTRINGS = ("**", "```", "->", "❌", "{", "}")
+
+
+def _name_stem(name: str) -> str:
+    """Drop the last letter of a Russian name, e.g. "Алиса" -> "Алис".
+
+    The debt-reminder prompt's own example inflects the payer's name for
+    grammar ("Алиса" -> "верните Алисе ...", dative case), so checking for the
+    name verbatim would reject perfectly good Qwen output. Comparing stems
+    instead still catches a message that dropped or swapped the person
+    entirely, without rejecting ordinary Russian case endings.
+    """
+    return name[:-1] if len(name) > 2 else name
+
+
+def _is_clean_debt_reminder_message(message: str, *, data: DebtReminderInput) -> bool:
+    """Whether ``message`` is safe to show a user as-is.
+
+    Ollama's ``format: "json"`` only guarantees the *response* parses as JSON
+    matching :class:`DebtReminderOut` — it says nothing about the *content* of
+    the "message" string, which is where garbage like leftover markdown, stray
+    JSON punctuation, or the model's own commentary about its answer ends up.
+    Qwen is asked for wording only (see the prompt above), so a trustworthy
+    message must still be a short, clean sentence that actually contains the
+    facts it was given — the money amount rendered exactly as the app renders
+    it everywhere else, not however Qwen chose to write the number, and the
+    same debtor, expense and group it was asked to word a reminder for.
+    """
+    text = message.strip()
+    if not text or len(text) > _DEBT_REMINDER_MAX_LENGTH:
+        return False
+    if len(text.split()) > _DEBT_REMINDER_MAX_WORDS:
+        return False
+    if any(marker in text for marker in _DEBT_REMINDER_FORBIDDEN_SUBSTRINGS):
+        return False
+    try:
+        amount_display = format_money(str_to_cents(data.amount_due), data.currency)
+    except ValueError:
+        return False
+    if amount_display not in text or data.expense not in text or data.group not in text:
+        return False
+    return _name_stem(data.payer) in text
+
+
 def generate_debt_reminder(data: DebtReminderInput) -> DebtReminderOut:
     """One short, polite Russian sentence reminding a debtor of a debt.
 
@@ -344,8 +397,9 @@ def generate_debt_reminder(data: DebtReminderInput) -> DebtReminderOut:
     ``data`` (already resolved by the caller) go into the prompt, and Qwen is
     asked for wording only — the caller never reads a number back out of the
     response. Raises :class:`OllamaError` on any failure (unreachable, bad
-    JSON, wrong shape, empty message) so the caller can fall back to a
-    deterministic message instead of losing the reminder.
+    JSON, wrong shape, empty message, or a message that fails
+    :func:`_is_clean_debt_reminder_message`) so the caller can fall back to a
+    deterministic message instead of losing the reminder or showing garbage.
     """
     base_url = settings.ollama_base_url.rstrip("/")
     try:
@@ -368,9 +422,13 @@ def generate_debt_reminder(data: DebtReminderInput) -> DebtReminderOut:
         raise OllamaError(f"Ollama недоступна или вернула некорректный ответ: {exc}") from exc
 
     try:
-        return DebtReminderOut.model_validate(parsed)
+        result = DebtReminderOut.model_validate(parsed)
     except ValidationError as exc:
         raise OllamaError(f"Модель вернула данные неожиданной формы: {exc}") from exc
+
+    if not _is_clean_debt_reminder_message(result.message, data=data):
+        raise OllamaError("Модель вернула повреждённый или неподходящий текст напоминания")
+    return result
 
 
 __all__ = [

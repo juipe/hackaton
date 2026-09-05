@@ -9,6 +9,7 @@ return canned responses. This file exercises ``generate_saving_tips`` and
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import httpx
@@ -17,6 +18,7 @@ import pytest
 from app.schemas.notification import DebtReminderInput
 from app.schemas.saving_tips import SavingTipsInput
 from app.services import ollama_service
+from app.utils.money import format_money
 
 
 def _payload() -> SavingTipsInput:
@@ -114,14 +116,13 @@ def _reminder_input() -> DebtReminderInput:
 
 
 def test_generate_debt_reminder_returns_parsed_message(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch_post(
-        monkeypatch,
-        '{"message": "Не забудьте вернуть Алисе 1250 ₽ за «Ужин»."}',
-    )
+    amount = format_money(125000, "RUB")
+    message = f"Не забудьте вернуть Алисе {amount} за «Ужин» в группе «Квартира»."
+    _patch_post(monkeypatch, json.dumps({"message": message}))
 
     result = ollama_service.generate_debt_reminder(_reminder_input())
 
-    assert result.message == "Не забудьте вернуть Алисе 1250 ₽ за «Ужин»."
+    assert result.message == message
 
 
 def test_generate_debt_reminder_rejects_invalid_json(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -151,6 +152,93 @@ def test_generate_debt_reminder_wraps_http_failures(monkeypatch: pytest.MonkeyPa
         raise httpx.ConnectTimeout("timed out")
 
     monkeypatch.setattr(ollama_service.httpx, "post", _raise)
+
+    with pytest.raises(ollama_service.OllamaError):
+        ollama_service.generate_debt_reminder(_reminder_input())
+
+
+def test_generate_debt_reminder_rejects_malformed_garbage(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A real observed failure mode: valid JSON envelope (Ollama's
+    # ``format: "json"`` guarantees that much), but the "message" string
+    # itself contains leftover markdown/JSON/meta-text.
+    garbage_message = (
+        'Напомнить Алисе вернуть 1250 ₽ за «Ужин» в группе «Квартира».}"}** '
+        "❌ (Too long and contains errors) ->"
+    )
+    _patch_post(monkeypatch, json.dumps({"message": garbage_message}))
+
+    with pytest.raises(ollama_service.OllamaError):
+        ollama_service.generate_debt_reminder(_reminder_input())
+
+
+def test_generate_debt_reminder_rejects_exact_reported_bug(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The exact malformed notification reported in production, reproduced
+    # with this file's own facts: valid JSON, but the message text itself is
+    # "Напомнить Оле вернуть 5000 ₽ за «раоава» в группе «Хакатон
+    # Сбер12».}"}** ❌ (Too long and contains errors) ->".
+    reported_bug_data = DebtReminderInput(
+        expense="раоава", amount_due="5000.00", currency="RUB", payer="Оля", group="Хакатон Сбер12"
+    )
+    garbage_message = (
+        'Напомнить Оле вернуть 5000 ₽ за «раоава» в группе «Хакатон Сбер12».}"}** '
+        "❌ (Too long and contains errors) ->"
+    )
+    _patch_post(monkeypatch, json.dumps({"message": garbage_message}))
+
+    with pytest.raises(ollama_service.OllamaError):
+        ollama_service.generate_debt_reminder(reported_bug_data)
+
+
+def test_generate_debt_reminder_accepts_desired_style_for_reported_bug(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The clean equivalent of the message above must still be accepted,
+    # correctly preserving debtor, amount, expense title and group.
+    reported_bug_data = DebtReminderInput(
+        expense="раоава", amount_due="5000.00", currency="RUB", payer="Оля", group="Хакатон Сбер12"
+    )
+    amount = format_money(500000, "RUB")
+    clean_message = f"Напомнить Оле вернуть {amount} за «раоава» в группе «Хакатон Сбер12»."
+    _patch_post(monkeypatch, json.dumps({"message": clean_message}))
+
+    result = ollama_service.generate_debt_reminder(reported_bug_data)
+
+    assert result.message == clean_message
+
+
+def test_generate_debt_reminder_rejects_wrong_money_format(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Otherwise-clean sentence, but the amount isn't rendered the way the
+    # rest of the app renders money ("1250 ₽" instead of "1 250,00 ₽").
+    _patch_post(
+        monkeypatch,
+        '{"message": "Не забудьте вернуть Алисе 1250 ₽ за «Ужин» в группе «Квартира»."}',
+    )
+
+    with pytest.raises(ollama_service.OllamaError):
+        ollama_service.generate_debt_reminder(_reminder_input())
+
+
+def test_generate_debt_reminder_rejects_missing_fact(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Correct format, but drops the group entirely.
+    _patch_post(
+        monkeypatch,
+        '{"message": "Не забудьте вернуть Алисе 1 250,00 ₽ за «Ужин»."}',
+    )
+
+    with pytest.raises(ollama_service.OllamaError):
+        ollama_service.generate_debt_reminder(_reminder_input())
+
+
+def test_generate_debt_reminder_rejects_overly_long_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    padding = " ".join(["слово"] * 40)
+    long_message = f"Не забудьте вернуть Алисе 1 250,00 ₽ за «Ужин» в группе «Квартира». {padding}"
+    _patch_post(monkeypatch, json.dumps({"message": long_message}))
 
     with pytest.raises(ollama_service.OllamaError):
         ollama_service.generate_debt_reminder(_reminder_input())
