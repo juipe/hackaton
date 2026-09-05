@@ -21,11 +21,11 @@ from app.services import ollama_service
 
 def _payload() -> SavingTipsInput:
     return SavingTipsInput(
-        total_spending_cents=50000,
+        total_spending_display="500,00 ₽",
         expense_count=5,
         currency="RUB",
         categories=[],
-        months=[],
+        trend=None,
     )
 
 

@@ -143,14 +143,37 @@ model. If Ollama is unreachable or returns something unusable, it falls back to 
 `FALLBACK_TIPS` list rather than failing the request; the dashboard must never break because the
 local model did. Same local-Ollama dependency and `OLLAMA_BASE_URL` config as the voice pipeline.
 
+#### Debt-reminder notifications (`services/debt_reminder_service.py`, `models/notification.py`)
+
+Not to be confused with `services/notification_service.py` (a group-invite emailer stub with no
+provider wired up — see its docstring). This is the in-app bell: `api/routes/notifications.py`
+exposes `GET /notifications` and `POST /notifications/read`, backed by
+`frontend/src/hooks/useNotifications.ts` (polls every 30s — no websocket) and
+`components/layout/NotificationBell.tsx`.
+
+One `Notification` row per debtor is created synchronously, in the same transaction as the
+expense, by `debt_reminder_service.create_reminders_for_expense` — called from
+`expense_service.create_expense` with the `SplitResult`s it already computed (this module never
+re-derives who owes what). Every display field (`expense_title`, `payer_name`, `group_name`,
+`amount_due_cents`) is a snapshot at commit time, not a live join, and a deterministic fallback
+`message` is filled in immediately so the row is complete even if nothing else ever runs. The
+row only becomes visible once `available_at` (`created_at` + `debt_reminder_delay_seconds`,
+default 10s) passes — a plain column, not a timer, so a restart can't lose it.
+
+Afterwards, `enhance_with_qwen` runs as a `BackgroundTasks` job (its own DB session — the
+request's is already closed) and best-effort replaces the fallback message with one worded by
+Qwen via `ollama_service.generate_debt_reminder`; failure is silently swallowed and the
+deterministic fallback stands. `source` (`"fallback"` vs `"qwen"`) records which path won but
+isn't exposed over the API.
+
 ### Frontend (`frontend/src/`)
 
 - **`pages/`** — route-level screens, wired up in `routes.tsx`. Authenticated routes are nested
   under `RequireAuth` + `AppLayout` in `components/layout/`.
 - **`hooks/`** — one file per API resource (`useGroups.ts`, `useExpenses.ts`, `useBalances.ts`,
-  `useVoiceExpense.ts`, etc.), each a thin TanStack Query wrapper. There is no manual
-  `useEffect(fetch...)` anywhere — all server state goes through these hooks, and mutations
-  invalidate the relevant query keys so screens refresh themselves.
+  `useVoiceExpense.ts`, `useNotifications.ts`, etc.), each a thin TanStack Query wrapper. There is
+  no manual `useEffect(fetch...)` anywhere — all server state goes through these hooks, and
+  mutations invalidate the relevant query keys so screens refresh themselves.
 - **`lib/api.ts`** — the only place that calls `fetch`. Handles the CSRF header, cookie-based
   auth, and error unwrapping (`ApiError`, `errorMessage()`). Route handlers/hooks should never
   call `fetch` directly.
@@ -194,11 +217,11 @@ class that isn't in the config instead of erroring, so a new token has to be add
   `InterfaceError`). Use Postgres for real runs.
 - The CSRF cookie name is duplicated in two places that must stay in sync: `COOKIE_NAME` /
   `CSRF_COOKIE_NAME` (backend env) and the constant in `frontend/src/lib/api.ts`.
-- Both the voice pipeline and saving tips need Ollama running separately (`ollama serve`, with
-  `ollama_model` pulled) — it is not started by `docker compose up`. If Ollama is unreachable,
-  voice drafting still succeeds but returns an empty extraction with a `warnings` entry, and
-  saving tips fall back to a fixed generic list — neither endpoint fails outright.
-- Some `frontend/src/components/expenses/` files have stray compiled `.js`/`.d.ts` siblings
-  checked into git next to their `.tsx` source (e.g. `ExpenseForm.js`, `VoiceExpenseDialog.d.ts`)
-  — these are build artifacts, not sources. Always edit the `.tsx` file; ignore or delete the
-  `.js`/`.d.ts` siblings rather than editing them.
+- Both the voice pipeline, saving tips, and debt-reminder wording need Ollama running separately
+  (`ollama serve`, with `ollama_model` pulled) — it is not started by `docker compose up`. If
+  Ollama is unreachable: voice drafting still succeeds but returns an empty extraction with a
+  `warnings` entry, saving tips fall back to a fixed generic list, and debt reminders keep their
+  deterministic fallback message — none of the three endpoints fails outright.
+- `services/notification_service.py` (group-invite email) and `services/debt_reminder_service.py`
+  + `models/notification.py` (in-app bell) are two unrelated systems that both use the word
+  "notification" — don't conflate them.

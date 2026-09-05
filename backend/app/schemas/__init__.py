@@ -47,8 +47,8 @@ from app.schemas.saving_tips import (
     SavingTip,
     SavingTipsCategoryInput,
     SavingTipsInput,
-    SavingTipsMonthInput,
     SavingTipsOut,
+    SavingTipsTrend,
 )
 from app.schemas.user import UserPublic
 from app.schemas.voice import (
@@ -99,8 +99,8 @@ __all__ = [
     "SavingTip",
     "SavingTipsCategoryInput",
     "SavingTipsInput",
-    "SavingTipsMonthInput",
     "SavingTipsOut",
+    "SavingTipsTrend",
     "SimplifyPreviewOut",
     "SimplifyRequest",
     "SpendingOverTimeOut",

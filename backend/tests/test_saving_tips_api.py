@@ -23,7 +23,7 @@ from app.models.group import Group
 from app.models.user import User
 from app.schemas.saving_tips import SavingTip, SavingTipsOut
 from app.services import ollama_service
-from app.utils.time import utcnow
+from app.utils.time import add_months, start_of_month, utcnow
 
 
 def _category(categories: list[Category], slug: str) -> Category:
@@ -207,14 +207,16 @@ def test_group_id_scopes_the_analysed_data(
     )
 
     assert response.status_code == 200
-    # 8000 is Family's own expense total — Trip's 50000 (a second group of
-    # Alice's) must never leak in just because she also belongs to it.
-    assert captured[0].total_spending_cents == 8000
+    # 8000 cents (80,00 ₽) is Family's own expense total — Trip's 50000
+    # (a second group of Alice's) must never leak in just because she also
+    # belongs to it.
+    assert captured[0].total_spending_display == "80,00 ₽"
     assert captured[0].expense_count == 1
     assert captured[0].currency == "RUB"
     assert len(captured[0].categories) == 1
     assert captured[0].categories[0].name == "Продукты"
-    assert captured[0].categories[0].percentage == 100.0
+    assert captured[0].categories[0].amount_display == "80,00 ₽"
+    assert captured[0].categories[0].percentage_display == "100%"
 
 
 def test_group_scope_never_includes_another_groups_spending(
@@ -242,7 +244,7 @@ def test_group_scope_never_includes_another_groups_spending(
     )
 
     assert response.status_code == 200
-    assert captured[0].total_spending_cents == 50000
+    assert captured[0].total_spending_display == "500,00 ₽"
     assert captured[0].expense_count == 1
     assert [category.name for category in captured[0].categories] == ["Путешествия"]
 
@@ -311,17 +313,220 @@ def test_sends_no_ids_or_member_data_to_qwen(
 
     payload = captured[0]
     dumped = payload.model_dump()
-    assert "categories" in dumped and "months" in dumped
+    assert "categories" in dumped and "trend" in dumped
     # Only the documented fields exist anywhere on the payload — no member
-    # names, emails, group/category ids, or debt/balance figures.
+    # names, emails, group/category ids, or debt/balance figures. Every
+    # amount and percentage is already a formatted display string, never a
+    # raw cents integer or an unrounded ratio Qwen could recompute.
     assert set(dumped.keys()) == {
-        "total_spending_cents",
+        "total_spending_display",
         "expense_count",
         "currency",
         "categories",
-        "months",
+        "trend",
     }
+    assert isinstance(dumped["total_spending_display"], str)
     for category in dumped["categories"]:
-        assert set(category.keys()) == {"name", "amount_cents", "percentage", "expense_count"}
-    for month in dumped["months"]:
-        assert set(month.keys()) == {"month", "amount_cents", "your_share_cents"}
+        assert set(category.keys()) == {
+            "name",
+            "amount_display",
+            "percentage_display",
+            "expense_count",
+        }
+        assert isinstance(category["amount_display"], str)
+        assert isinstance(category["percentage_display"], str)
+    # Both expenses in this fixture occur "now", so they land in the same
+    # month bucket — no second month to compare against, so no trend.
+    assert dumped["trend"] is None
+
+
+def test_odd_cents_are_converted_to_rubles_before_reaching_qwen(
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    api_client: Callable[[User], TestClient],
+    make_user: Callable[..., User],
+    group_factory: Callable[..., Group],
+    categories: list[Category],
+) -> None:
+    """A non-round cents amount must already be a correct ruble string.
+
+    Regression for the real E2E failure where Qwen was handed a raw cents
+    integer and mis-converted it (5 RUB reported as "500 RUB", 70 RUB
+    reported as "19,000 RUB"). The backend must do this conversion, not Qwen
+    — so it must already be right in the payload Qwen receives.
+    """
+    alice = make_user(name="Alice")
+    group = group_factory(alice, name="Solo")
+
+    captured: list[object] = []
+
+    def _capture(payload: object) -> SavingTipsOut:
+        captured.append(payload)
+        return SavingTipsOut(
+            tips=[
+                SavingTip(title="A", text="A.", type="generic"),
+                SavingTip(title="B", text="B.", type="generic"),
+            ]
+        )
+
+    monkeypatch.setattr(ollama_service, "generate_saving_tips", _capture)
+
+    # An odd, easy-to-corrupt amount — 500 cents is 5,00 ₽, not "500 ₽".
+    db.add(
+        Expense(
+            group_id=group.id,
+            created_by=alice.id,
+            title="Coffee",
+            amount_cents=500,
+            currency=group.currency,
+            category_id=_category(categories, "food").id,
+            paid_by=alice.id,
+            split_mode=SplitMode.EQUAL.value,
+            occurred_at=utcnow(),
+        )
+    )
+    db.commit()
+
+    response = api_client(alice).post(
+        "/api/dashboard/saving-tips", params={"group_id": str(group.id)}
+    )
+
+    assert response.status_code == 200
+    assert captured[0].total_spending_display == "5,00 ₽"
+    assert captured[0].categories[0].amount_display == "5,00 ₽"
+    assert captured[0].categories[0].percentage_display == "100%"
+
+
+def test_trend_percentage_is_calculated_by_the_backend(
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    api_client: Callable[[User], TestClient],
+    make_user: Callable[..., User],
+    group_factory: Callable[..., Group],
+    categories: list[Category],
+) -> None:
+    """Month-to-month change must arrive pre-computed, exactly like the
+    real E2E failure this fixes: 220,00 ₽ -> 300,00 ₽ is +36,4%, not a
+    number Qwen invented or mis-derived.
+    """
+    alice = make_user(name="Alice")
+    group = group_factory(alice, name="Two Months")
+    food = _category(categories, "food")
+
+    this_month = start_of_month(utcnow())
+    last_month = add_months(this_month, -1)
+
+    db.add(
+        Expense(
+            group_id=group.id,
+            created_by=alice.id,
+            title="Last month",
+            amount_cents=22000,
+            currency=group.currency,
+            category_id=food.id,
+            paid_by=alice.id,
+            split_mode=SplitMode.EQUAL.value,
+            occurred_at=last_month,
+        )
+    )
+    db.add(
+        Expense(
+            group_id=group.id,
+            created_by=alice.id,
+            title="This month",
+            amount_cents=30000,
+            currency=group.currency,
+            category_id=food.id,
+            paid_by=alice.id,
+            split_mode=SplitMode.EQUAL.value,
+            occurred_at=this_month,
+        )
+    )
+    db.commit()
+
+    captured: list[object] = []
+
+    def _capture(payload: object) -> SavingTipsOut:
+        captured.append(payload)
+        return SavingTipsOut(
+            tips=[
+                SavingTip(title="A", text="A.", type="generic"),
+                SavingTip(title="B", text="B.", type="generic"),
+            ]
+        )
+
+    monkeypatch.setattr(ollama_service, "generate_saving_tips", _capture)
+
+    response = api_client(alice).post(
+        "/api/dashboard/saving-tips", params={"group_id": str(group.id)}
+    )
+
+    assert response.status_code == 200
+    trend = captured[0].trend
+    assert trend is not None
+    assert trend.from_display == "220,00 ₽"
+    assert trend.to_display == "300,00 ₽"
+    assert trend.change_display == "+36,4%"
+
+
+def test_no_trend_when_only_one_month_has_data(
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    api_client: Callable[[User], TestClient],
+    make_user: Callable[..., User],
+    group_factory: Callable[..., Group],
+    categories: list[Category],
+) -> None:
+    """A single month of history must never produce a fabricated trend."""
+    alice = make_user(name="Alice")
+    group = group_factory(alice, name="One Month")
+
+    db.add(
+        Expense(
+            group_id=group.id,
+            created_by=alice.id,
+            title="Coffee",
+            amount_cents=500,
+            currency=group.currency,
+            category_id=_category(categories, "food").id,
+            paid_by=alice.id,
+            split_mode=SplitMode.EQUAL.value,
+            occurred_at=utcnow(),
+        )
+    )
+    db.commit()
+
+    captured: list[object] = []
+
+    def _capture(payload: object) -> SavingTipsOut:
+        captured.append(payload)
+        return SavingTipsOut(
+            tips=[
+                SavingTip(title="A", text="A.", type="generic"),
+                SavingTip(title="B", text="B.", type="generic"),
+            ]
+        )
+
+    monkeypatch.setattr(ollama_service, "generate_saving_tips", _capture)
+
+    response = api_client(alice).post(
+        "/api/dashboard/saving-tips", params={"group_id": str(group.id)}
+    )
+
+    assert response.status_code == 200
+    assert captured[0].trend is None
+
+
+def test_saving_tip_output_carries_no_numeric_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Qwen's return value is free text only — ``title``/``text``/``type``.
+
+    Even if Qwen's generated text contains a wrong number, there is no
+    numeric field anywhere on ``SavingTip``/``SavingTipsOut`` for that wrong
+    number to land in and be reused elsewhere in the app — it can only ever
+    exist inside a display string, never parsed back into a value that
+    drives any calculation, balance, or persisted record.
+    """
+    tip = SavingTip(title="A", text="Что-то про 19 000 ₽, но это просто текст.", type="generic")
+    dumped = tip.model_dump()
+    assert set(dumped.keys()) == {"title", "text", "type"}
+    assert all(isinstance(value, str) for value in dumped.values())

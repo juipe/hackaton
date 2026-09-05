@@ -2,10 +2,19 @@
 
 ``SavingTipsInput`` is the trimmed slice of the dashboard's own analytics
 (:mod:`app.services.dashboard_service`) handed to Qwen — spending totals,
-category shares and a monthly series, nothing else. No ids, no member/debt
+category shares and a two-month trend, nothing else. No ids, no member/debt
 data, no auth details ever go into it; see ``app.services.saving_tips_service``
-for how it's assembled. ``SavingTipsOut`` is both what Qwen must return and
-what the API responds with — the same shape, so no extra mapping step.
+for how it's assembled.
+
+Every number Qwen could get wrong (cents-to-rubles conversion, percentages,
+month-to-month change) is pre-calculated and pre-formatted by the backend
+into a ``*_display`` string using :mod:`app.utils.money` — Qwen only ever
+copies these strings into its prose, it never sees a raw cents integer or a
+raw ratio to convert or round itself. ``SavingTipsOut`` is both what Qwen
+must return and what the API responds with — the same shape, so no extra
+mapping step, and it carries no numeric fields at all: only free-text title/
+text strings and a type label, so a wrong number Qwen might type inside
+``text`` can never be parsed back out and used anywhere else in the app.
 """
 
 from __future__ import annotations
@@ -17,25 +26,34 @@ from pydantic import BaseModel, Field, field_validator
 
 class SavingTipsCategoryInput(BaseModel):
     name: str
-    amount_cents: int
-    percentage: float
+    amount_display: str
+    percentage_display: str
     expense_count: int
 
 
-class SavingTipsMonthInput(BaseModel):
-    month: str
-    amount_cents: int
-    your_share_cents: int
+class SavingTipsTrend(BaseModel):
+    """Total spending compared between the two most recent months with data.
+
+    Only ever built when a safe comparison exists (see
+    ``app.services.saving_tips_service._build_trend``) — absent otherwise, so
+    Qwen is never tempted to invent a trend out of a single data point.
+    """
+
+    from_label: str
+    to_label: str
+    from_display: str
+    to_display: str
+    change_display: str
 
 
 class SavingTipsInput(BaseModel):
     """Exactly the fields useful for a saving recommendation — see module docstring."""
 
-    total_spending_cents: int
+    total_spending_display: str
     expense_count: int
     currency: str
     categories: list[SavingTipsCategoryInput] = Field(default_factory=list)
-    months: list[SavingTipsMonthInput] = Field(default_factory=list)
+    trend: SavingTipsTrend | None = None
 
 
 TipType = Literal["data_driven", "generic"]
@@ -62,7 +80,7 @@ __all__ = [
     "SavingTip",
     "SavingTipsCategoryInput",
     "SavingTipsInput",
-    "SavingTipsMonthInput",
     "SavingTipsOut",
+    "SavingTipsTrend",
     "TipType",
 ]
