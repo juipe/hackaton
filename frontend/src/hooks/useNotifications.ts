@@ -10,12 +10,22 @@ export const NOTIFICATIONS_QUERY_KEY = ["notifications"] as const;
  * filtered server-side to what's past its 10-second delay. Polled, not
  * pushed: there is no websocket in this app, and a bell that is a few tens of
  * seconds behind is an acceptable trade for not adding one.
+ *
+ * The global `queryClient` default (`staleTime: 30_000`, `refetchOnWindowFocus:
+ * false`) is meant for data that doesn't change from other tabs/actions on its
+ * own — notifications don't fit that: a budget threshold or debt reminder can
+ * appear at any time from an action the bell itself has no way to know about.
+ * Overridden here, per-query, so it doesn't affect any other screen: always
+ * stale (so remounting/refocusing refetches instead of serving a cached
+ * "nothing yet"), and refetch on window focus too, on top of the interval.
  */
 export function useNotifications() {
   return useQuery({
     queryKey: NOTIFICATIONS_QUERY_KEY,
     queryFn: () => api.get<Notification[]>("/notifications"),
     refetchInterval: 30_000,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   });
 }
 

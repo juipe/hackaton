@@ -191,6 +191,33 @@ describe("NotificationBell", () => {
   );
 
   it(
+    "подтягивает новое уведомление при возврате фокуса на вкладку, без перезагрузки",
+    async () => {
+      const user = userEvent.setup();
+      let requestCount = 0;
+      stubFetch(
+        withAuthStub((url) => {
+          if (url !== "/api/notifications") return jsonResponse([]);
+          requestCount += 1;
+          return requestCount === 1 ? jsonResponse([]) : jsonResponse([makeNotification()]);
+        }),
+      );
+
+      renderWithProviders(<NotificationBell />);
+      await openPanel(user);
+      expect(await screen.findByText("Пока нет уведомлений")).toBeInTheDocument();
+
+      window.dispatchEvent(new Event("visibilitychange"));
+      window.dispatchEvent(new Event("focus"));
+
+      await waitFor(() =>
+        expect(screen.getByTestId("notification-unread-dot")).toBeInTheDocument(),
+      );
+    },
+    INTERACTION_TIMEOUT,
+  );
+
+  it(
     "отмечает уведомления прочитанными при открытии панели",
     async () => {
       const user = userEvent.setup();
