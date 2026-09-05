@@ -258,6 +258,78 @@ def test_ollama_failure_degrades_gracefully_instead_of_erroring(
     assert any("Qwen" in warning for warning in draft.warnings)
 
 
+# -------------------------------------------------------------------- title
+
+
+def test_missing_title_falls_back_to_resolved_category_name(
+    monkeypatch: pytest.MonkeyPatch, db: Session, group: Group, people: tuple[User, User, User]
+) -> None:
+    """No explicit title, but the category resolves — title should fall back
+    to the category name rather than being left blank (which would fail the
+    same "Укажите название" validation manual entry enforces)."""
+    anya, andrey, boris = people
+    _stub_pipeline(
+        monkeypatch,
+        transcript="Заплатил 1200 рублей за такси, разделить с Андреем и Борисом",
+        extraction=_extraction(
+            amount="1200",
+            category_slug="transport",
+            payer_name="я",
+            participants=[_share("Андрей"), _share("Борис")],
+        ),
+    )
+
+    draft = voice_service.build_draft(db, group=group, actor=anya, audio_bytes=b"fake-audio")
+
+    assert draft.category.status == "resolved"
+    assert draft.category.value is not None
+    assert draft.title == draft.category.value.name
+    assert draft.amount_cents == 120000
+
+
+def test_explicit_title_is_kept_over_category_fallback(
+    monkeypatch: pytest.MonkeyPatch, db: Session, group: Group, people: tuple[User, User, User]
+) -> None:
+    anya, andrey, boris = people
+    _stub_pipeline(
+        monkeypatch,
+        transcript="Заплатил 1200 рублей за такси до аэропорта",
+        extraction=_extraction(
+            title="Такси до аэропорта",
+            amount="1200",
+            category_slug="transport",
+            payer_name="я",
+            participants=[_share("Андрей"), _share("Борис")],
+        ),
+    )
+
+    draft = voice_service.build_draft(db, group=group, actor=anya, audio_bytes=b"fake-audio")
+
+    assert draft.title == "Такси до аэропорта"
+
+
+def test_missing_title_and_unresolved_category_leaves_title_blank(
+    monkeypatch: pytest.MonkeyPatch, db: Session, group: Group, people: tuple[User, User, User]
+) -> None:
+    """No title and no category to fall back to (Ollama unreachable, so the
+    category is genuinely unresolved) — title stays ``None`` rather than
+    inventing anything; the confirmation form still asks for it by hand."""
+    anya, *_ = people
+    monkeypatch.setattr(
+        voice_service.whisper_service, "transcribe", lambda _audio: "Заплатил за обед"
+    )
+
+    def _boom(_transcript: str, _categories: object) -> LLMExpenseExtraction:
+        raise ollama_service.OllamaError("Ollama недоступна")
+
+    monkeypatch.setattr(voice_service.ollama_service, "extract_expense", _boom)
+
+    draft = voice_service.build_draft(db, group=group, actor=anya, audio_bytes=b"fake-audio")
+
+    assert draft.category.status == "unresolved"
+    assert draft.title is None
+
+
 # --------------------------------------------------------------- exact split
 
 

@@ -88,18 +88,40 @@ def build_draft(
 
     _validate_split(split_mode, amount_cents, participants.resolved, warnings)
 
+    category = _resolve_category(extraction.category_slug, categories, ollama_succeeded)
+    title = _resolve_title(extraction.title, category)
+
     return VoiceExpenseDraftOut(
         transcript=transcript,
-        title=(extraction.title or "").strip() or None,
+        title=title,
         description=(extraction.description or "").strip() or None,
         amount_cents=amount_cents,
         occurred_at=_resolve_date(extraction.occurred_at, warnings),
         split_mode=split_mode,
         payer=_resolve_payer(extraction.payer_name, members, actor),
         participants=participants,
-        category=_resolve_category(extraction.category_slug, categories, ollama_succeeded),
+        category=category,
         warnings=warnings,
     )
+
+
+def _resolve_title(
+    raw_title: str | None, category: FieldResolution[CategoryOut]
+) -> str | None:
+    """A missing title is required by ``ExpenseCreate`` — see its docstring.
+
+    Rather than inventing a detailed name, fall back to the resolved
+    category's own name (e.g. "Продукты"), which is already real data the
+    user confirmed by speaking about that category — never guessed text.
+    Left ``None`` when there is no category to fall back to either; the
+    confirmation form still asks the user to fill it in by hand then.
+    """
+    title = (raw_title or "").strip() or None
+    if title is not None:
+        return title
+    if category.status == "resolved" and category.value is not None:
+        return category.value.name
+    return None
 
 
 def _resolve_split_mode(raw: str | None) -> SplitMode:
