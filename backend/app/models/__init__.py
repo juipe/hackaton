@@ -10,6 +10,7 @@ from app.models.expense import Expense, ExpenseSplit, SplitMode
 from app.models.group import Group
 from app.models.invite import GroupInvite
 from app.models.member import GroupMember, GroupRole
+from app.models.notification import Notification
 from app.models.payment import Payment
 from app.models.user import User
 
@@ -24,6 +25,7 @@ __all__ = [
     "GroupInvite",
     "GroupMember",
     "GroupRole",
+    "Notification",
     "Payment",
     "SplitMode",
     "User",

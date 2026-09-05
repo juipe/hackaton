@@ -269,6 +269,20 @@ export interface SavingTipsResponse {
   tips: SavingTip[];
 }
 
+export interface Notification {
+  id: Uuid;
+  group_id: Uuid;
+  group_name: string;
+  expense_id: Uuid;
+  expense_title: string;
+  payer_name: string;
+  amount_due_cents: number;
+  currency: string;
+  message: string;
+  is_read: boolean;
+  created_at: IsoDateTime;
+}
+
 /* ---------------------------------- inputs --------------------------------- */
 
 export interface RegisterInput {

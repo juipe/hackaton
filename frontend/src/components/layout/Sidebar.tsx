@@ -3,6 +3,7 @@ import { NavLink } from "react-router-dom";
 
 import { useAddExpense } from "@/components/layout/AddExpenseContext";
 import { NAV_ITEMS } from "@/components/layout/NavItems";
+import { NotificationBell } from "@/components/layout/NotificationBell";
 import { UserMenu } from "@/components/layout/UserMenu";
 import { useVoiceExpenseDialog } from "@/components/layout/VoiceExpenseDialogContext";
 import { Wordmark } from "@/components/layout/Wordmark";
@@ -182,8 +183,9 @@ export function Sidebar() {
         <GroupLinks />
       </div>
 
-      <div className="mt-auto pt-2">
-        <UserMenu variant="full" />
+      <div className="mt-auto flex items-center gap-1.5 pt-2">
+        <UserMenu variant="full" className="min-w-0 flex-1" />
+        <NotificationBell className="shrink-0 bg-card shadow-flat hover:shadow-nav" />
       </div>
     </aside>
   );

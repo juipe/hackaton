@@ -131,6 +131,18 @@ so a bad voice draft is caught by the same, already-tested path either way. Conf
 since Ollama itself runs on the host, not in a container. No external AI API is ever called —
 both models run locally.
 
+#### AI saving tips (`services/saving_tips_service.py`)
+
+`POST /dashboard/saving-tips` (`api/routes/dashboard.py`, params: `period`/`date_from`/
+`date_to`/`group_id`, same as the rest of the dashboard endpoints) powers the "AI советы" block
+on both the main dashboard and a single group's analytics tab. It deliberately does **not**
+recompute anything: it calls the existing `dashboard_service` aggregates for the same scope,
+trims them down to spending totals / category shares / a monthly series, and hands only that to
+`ollama_service.generate_saving_tips` — no member names, debts, or ids are ever sent to the
+model. If Ollama is unreachable or returns something unusable, it falls back to a fixed
+`FALLBACK_TIPS` list rather than failing the request; the dashboard must never break because the
+local model did. Same local-Ollama dependency and `OLLAMA_BASE_URL` config as the voice pipeline.
+
 ### Frontend (`frontend/src/`)
 
 - **`pages/`** — route-level screens, wired up in `routes.tsx`. Authenticated routes are nested
@@ -182,9 +194,10 @@ class that isn't in the config instead of erroring, so a new token has to be add
   `InterfaceError`). Use Postgres for real runs.
 - The CSRF cookie name is duplicated in two places that must stay in sync: `COOKIE_NAME` /
   `CSRF_COOKIE_NAME` (backend env) and the constant in `frontend/src/lib/api.ts`.
-- Voice expenses need Ollama running separately (`ollama serve`, with `ollama_model` pulled) —
-  it is not started by `docker compose up`. If Ollama is unreachable, the draft endpoint still
-  succeeds but returns an empty extraction with a `warnings` entry instead of failing outright.
+- Both the voice pipeline and saving tips need Ollama running separately (`ollama serve`, with
+  `ollama_model` pulled) — it is not started by `docker compose up`. If Ollama is unreachable,
+  voice drafting still succeeds but returns an empty extraction with a `warnings` entry, and
+  saving tips fall back to a fixed generic list — neither endpoint fails outright.
 - Some `frontend/src/components/expenses/` files have stray compiled `.js`/`.d.ts` siblings
   checked into git next to their `.tsx` source (e.g. `ExpenseForm.js`, `VoiceExpenseDialog.d.ts`)
   — these are build artifacts, not sources. Always edit the `.tsx` file; ignore or delete the

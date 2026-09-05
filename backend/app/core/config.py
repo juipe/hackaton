@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     ollama_timeout_seconds: int = 120
     voice_max_upload_bytes: int = 15 * 1024 * 1024
 
+    # Debt-reminder notifications — see services/debt_reminder_service.py. The
+    # delay is a plain column value (``available_at``), not a scheduled job, so
+    # it survives a process restart with no extra machinery.
+    debt_reminder_delay_seconds: int = 10
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

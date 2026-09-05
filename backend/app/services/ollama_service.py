@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from app.core.config import settings
 from app.models.category import Category
+from app.schemas.notification import DebtReminderInput, DebtReminderOut
 from app.schemas.saving_tips import SavingTipsInput, SavingTipsOut
 from app.schemas.voice import LLMExpenseExtraction
 
@@ -165,6 +166,41 @@ _SAVING_TIPS_SYSTEM_PROMPT = """\
 """
 
 
+_DEBT_REMINDER_SYSTEM_PROMPT = """\
+Ты формулируешь короткое вежливое напоминание о долге для приложения
+совместных расходов. Тебе дан JSON с фактами о долге:
+
+{
+  "expense": название расхода,
+  "amount_due": сумма долга в рублях строкой,
+  "currency": код валюты (всегда "RUB"),
+  "payer": имя того, кому нужно вернуть долг,
+  "group": название группы, в которой возник расход
+}
+
+Верни ТОЛЬКО JSON-объект без пояснений и без markdown, ровно такой формы:
+
+{"message": "..."}
+
+Правила:
+
+- "message" — одно короткое вежливое предложение на русском языке (не длиннее
+  20 слов), которое напоминает о долге.
+- Обязательно упомяни сумму, кому нужно вернуть долг ("payer") и название
+  расхода или группы.
+- Никогда не меняй, не округляй и не выдумывай сумму, имя или название —
+  используй только то, что дано в JSON, дословно.
+- Не добавляй извинений, эмодзи, приветствий и других лишних фраз — только
+  напоминание по делу.
+
+## Пример
+
+Данные: {"expense": "Ужин", "amount_due": "1250.00", "currency": "RUB",
+"payer": "Алиса", "group": "Квартира"}
+{"message": "Не забудьте вернуть Алисе 1250 ₽ за «Ужин» в группе «Квартира»."}
+"""
+
+
 class OllamaError(Exception):
     """Ollama was unreachable, or returned something that doesn't parse."""
 
@@ -238,4 +274,46 @@ def generate_saving_tips(data: SavingTipsInput) -> SavingTipsOut:
         raise OllamaError(f"Модель вернула данные неожиданной формы: {exc}") from exc
 
 
-__all__ = ["OllamaError", "extract_expense", "generate_saving_tips"]
+def generate_debt_reminder(data: DebtReminderInput) -> DebtReminderOut:
+    """One short, polite Russian sentence reminding a debtor of a debt.
+
+    Independent of :func:`extract_expense` and :func:`generate_saving_tips` —
+    separate prompt, separate schema, same Ollama call shape. Only the facts in
+    ``data`` (already resolved by the caller) go into the prompt, and Qwen is
+    asked for wording only — the caller never reads a number back out of the
+    response. Raises :class:`OllamaError` on any failure (unreachable, bad
+    JSON, wrong shape, empty message) so the caller can fall back to a
+    deterministic message instead of losing the reminder.
+    """
+    base_url = settings.ollama_base_url.rstrip("/")
+    try:
+        response = httpx.post(
+            f"{base_url}/api/generate",
+            json={
+                "model": settings.ollama_model,
+                "system": _DEBT_REMINDER_SYSTEM_PROMPT,
+                "prompt": data.model_dump_json(),
+                "format": "json",
+                "stream": False,
+                "think": False,
+            },
+            timeout=settings.ollama_timeout_seconds,
+        )
+        response.raise_for_status()
+        raw = response.json().get("response", "")
+        parsed = json.loads(raw)
+    except (httpx.HTTPError, json.JSONDecodeError) as exc:
+        raise OllamaError(f"Ollama недоступна или вернула некорректный ответ: {exc}") from exc
+
+    try:
+        return DebtReminderOut.model_validate(parsed)
+    except ValidationError as exc:
+        raise OllamaError(f"Модель вернула данные неожиданной формы: {exc}") from exc
+
+
+__all__ = [
+    "OllamaError",
+    "extract_expense",
+    "generate_debt_reminder",
+    "generate_saving_tips",
+]

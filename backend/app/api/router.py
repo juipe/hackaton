@@ -14,6 +14,7 @@ from app.api.routes import (
     groups,
     invites,
     members,
+    notifications,
     payments,
     voice,
 )
@@ -31,6 +32,7 @@ api_router.include_router(balances.router)
 api_router.include_router(payments.router)
 api_router.include_router(dashboard.router)
 api_router.include_router(activity.router)
+api_router.include_router(notifications.router)
 
 
 @api_router.get("/health", tags=["Служебное"], summary="Проверка работоспособности")

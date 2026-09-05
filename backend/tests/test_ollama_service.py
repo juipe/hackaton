@@ -1,9 +1,9 @@
-"""Unit tests for the saving-tips half of ``ollama_service``.
+"""Unit tests for the saving-tips and debt-reminder halves of ``ollama_service``.
 
 Mirrors how the voice pipeline is tested elsewhere: no real Ollama server is
 ever contacted — ``httpx.post`` is monkeypatched at the module level to
-return canned responses. This file only exercises
-``generate_saving_tips``; ``extract_expense`` is untouched and covered by
+return canned responses. This file exercises ``generate_saving_tips`` and
+``generate_debt_reminder``; ``extract_expense`` is untouched and covered by
 ``test_voice_api.py``.
 """
 
@@ -14,6 +14,7 @@ from typing import Any
 import httpx
 import pytest
 
+from app.schemas.notification import DebtReminderInput
 from app.schemas.saving_tips import SavingTipsInput
 from app.services import ollama_service
 
@@ -97,3 +98,59 @@ def test_generate_saving_tips_wraps_http_failures(monkeypatch: pytest.MonkeyPatc
 
     with pytest.raises(ollama_service.OllamaError):
         ollama_service.generate_saving_tips(_payload())
+
+
+# --------------------------------------------------------------- debt reminders
+
+
+def _reminder_input() -> DebtReminderInput:
+    return DebtReminderInput(
+        expense="Ужин",
+        amount_due="1250.00",
+        currency="RUB",
+        payer="Алиса",
+        group="Квартира",
+    )
+
+
+def test_generate_debt_reminder_returns_parsed_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_post(
+        monkeypatch,
+        '{"message": "Не забудьте вернуть Алисе 1250 ₽ за «Ужин»."}',
+    )
+
+    result = ollama_service.generate_debt_reminder(_reminder_input())
+
+    assert result.message == "Не забудьте вернуть Алисе 1250 ₽ за «Ужин»."
+
+
+def test_generate_debt_reminder_rejects_invalid_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_post(monkeypatch, "not json at all")
+
+    with pytest.raises(ollama_service.OllamaError):
+        ollama_service.generate_debt_reminder(_reminder_input())
+
+
+def test_generate_debt_reminder_rejects_wrong_shape(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Valid JSON, but no "message" key at all.
+    _patch_post(monkeypatch, '{"text": "sure"}')
+
+    with pytest.raises(ollama_service.OllamaError):
+        ollama_service.generate_debt_reminder(_reminder_input())
+
+
+def test_generate_debt_reminder_rejects_empty_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_post(monkeypatch, '{"message": ""}')
+
+    with pytest.raises(ollama_service.OllamaError):
+        ollama_service.generate_debt_reminder(_reminder_input())
+
+
+def test_generate_debt_reminder_wraps_http_failures(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _raise(*_args: Any, **_kwargs: Any) -> Any:
+        raise httpx.ConnectTimeout("timed out")
+
+    monkeypatch.setattr(ollama_service.httpx, "post", _raise)
+
+    with pytest.raises(ollama_service.OllamaError):
+        ollama_service.generate_debt_reminder(_reminder_input())

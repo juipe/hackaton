@@ -11,11 +11,12 @@ from __future__ import annotations
 import uuid
 from datetime import date
 
-from fastapi import APIRouter, Query, Response, status
+from fastapi import APIRouter, BackgroundTasks, Query, Response, status
 
 from app.core.deps import CurrentUser, DbSession, Membership, assert_membership
+from app.repositories import notification_repo
 from app.schemas.expense import ExpenseCreate, ExpenseOut, ExpensePage, ExpenseUpdate
-from app.services import expense_service
+from app.services import debt_reminder_service, expense_service
 
 router = APIRouter(tags=["Расходы"])
 
@@ -66,6 +67,7 @@ def create_group_expense(
     db: DbSession,
     user: CurrentUser,
     membership: Membership,
+    background_tasks: BackgroundTasks,
 ) -> ExpenseOut:
     expense = expense_service.create_expense(
         db,
@@ -80,6 +82,12 @@ def create_group_expense(
         split_mode=payload.split_mode,
         participants=payload.participants,
     )
+    # The reminder rows (with a deterministic fallback message already in them)
+    # are already committed above. Wording them with Qwen instead happens here,
+    # after the response is on its way — the request never waits on Ollama.
+    notification_ids = notification_repo.ids_for_expense(db, expense.id)
+    if notification_ids:
+        background_tasks.add_task(debt_reminder_service.enhance_with_qwen, notification_ids)
     return expense_service.build_expense_out(expense, user.id)
 
 

@@ -25,6 +25,7 @@ from app.models.user import User
 from app.repositories import category_repo, expense_repo, group_repo
 from app.schemas.expense import ExpenseOut, ExpensePage, ParticipantIn, SplitOut
 from app.services.activity_service import log_activity
+from app.services.debt_reminder_service import create_reminders_for_expense
 from app.services.split_engine import SplitInput, SplitResult, compute_splits
 from app.utils.time import ensure_utc, utcnow
 
@@ -152,6 +153,9 @@ def create_expense(
         entity_id=expense.id,
         meta=_activity_meta(expense),
     )
+    # Reuses the very same `results` the splits above were built from — no
+    # recomputation, no second opinion on who owes what.
+    create_reminders_for_expense(db, expense=expense, group=group, results=results)
     db.commit()
     return expense
 
