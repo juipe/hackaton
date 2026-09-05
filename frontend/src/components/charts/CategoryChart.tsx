@@ -149,7 +149,19 @@ export function CategoryChart({
               <Cell key={slice.category_id} fill={slice.color} />
             ))}
           </Pie>
-          <Tooltip content={<CategoryTooltip currency={currency} />} />
+          {/*
+           * `position.x` is pinned just past the donut's own edge (rather than
+           * left to Recharts' cursor-following default) so the tooltip can
+           * never land on top of the center total — the ring's hover point is
+           * always inside this same 0..DONUT_SIZE box the center label also
+           * occupies, so any coordinate Recharts would pick on its own still
+           * overlaps it.
+           */}
+          <Tooltip
+            content={<CategoryTooltip currency={currency} />}
+            position={{ x: DONUT_SIZE + 8 }}
+            allowEscapeViewBox={{ x: true, y: true }}
+          />
         </PieChart>
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-0.5">
           <span className="text-xs text-dim">Всего</span>
@@ -166,21 +178,36 @@ export function CategoryChart({
        * влезает. Обрезанное название читается хуже, чем строка в два ряда,
        * поэтому числа выравниваются по первой строке, а имя занимает столько,
        * сколько нужно.
+       *
+       * Имя и пара «сумма + процент» — две независимые flex-группы в одном
+       * ряду с `flex-wrap`, а не три элемента в общем ряду: когда имени не
+       * хватает места, переносится вся группа суммы/процента целиком, а не
+       * само название посимвольно — это единственный способ гарантировать,
+       * что они никогда не наложатся друг на друга.
        */}
       <ul className="flex w-full min-w-0 flex-1 flex-col gap-3">
         {visible.map((slice) => (
-          <li key={slice.category_id} className="flex items-start gap-2.5">
-            <span
-              className="mt-[6px] size-2.5 shrink-0 rounded-[3px]"
-              style={{ backgroundColor: slice.color }}
-              aria-hidden
-            />
-            <span className="min-w-0 flex-1 text-[15px] leading-[1.35]">{slice.name}</span>
-            <span className="tabular-nums-money shrink-0 text-[15px] font-semibold leading-[1.35]">
-              {formatMoneyRounded(slice.amount_cents)}
+          <li
+            key={slice.category_id}
+            className="flex flex-wrap items-start gap-x-2.5 gap-y-1"
+          >
+            <span className="flex min-w-0 flex-auto items-start gap-2.5">
+              <span
+                className="mt-[6px] size-2.5 shrink-0 rounded-[3px]"
+                style={{ backgroundColor: slice.color }}
+                aria-hidden
+              />
+              <span className="min-w-0 break-words text-[15px] leading-[1.35]">
+                {slice.name}
+              </span>
             </span>
-            <span className="tabular-nums-money w-11 shrink-0 text-right text-[13px] leading-[1.35] text-dim">
-              {formatPercentage(slice.percentage)}
+            <span className="ml-auto flex shrink-0 items-baseline gap-2.5">
+              <span className="tabular-nums-money text-[15px] font-semibold leading-[1.35]">
+                {formatMoneyRounded(slice.amount_cents)}
+              </span>
+              <span className="tabular-nums-money w-11 text-right text-[13px] leading-[1.35] text-dim">
+                {formatPercentage(slice.percentage)}
+              </span>
             </span>
           </li>
         ))}
