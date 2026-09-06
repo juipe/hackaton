@@ -1,9 +1,9 @@
 """Debt-reminder notification schemas.
 
-``DebtReminderInput``/``DebtReminderOut`` are the minimal Qwen contract for
-wording a reminder — see ``app.services.ollama_service.generate_debt_reminder``.
+``DebtReminderInput``/``DebtReminderOut`` are the minimal LLM contract for
+wording a reminder — see ``app.services.gigachat_service.generate_debt_reminder``.
 Only the facts needed to phrase one sentence go in; the backend never reads a
-number back out of Qwen's answer, so it cannot invent an amount or a name.
+number back out of the model's answer, so it cannot invent an amount or a name.
 ``NotificationOut`` is the API shape, built straight off the (denormalized)
 ``Notification`` row — the amount, payer and expense name in it always come
 from the backend, never from ``message``.
@@ -21,7 +21,7 @@ from app.utils.time import ensure_utc
 
 
 class DebtReminderInput(BaseModel):
-    """Exactly what Qwen needs to phrase one sentence — see module docstring."""
+    """Exactly what the model needs to phrase one sentence — see module docstring."""
 
     expense: str
     amount_due: str

@@ -1,19 +1,19 @@
 """AI saving-tips schemas.
 
 ``SavingTipsInput`` is the trimmed slice of the dashboard's own analytics
-(:mod:`app.services.dashboard_service`) handed to Qwen — spending totals,
+(:mod:`app.services.dashboard_service`) handed to the LLM — spending totals,
 category shares and a two-month trend, nothing else. No ids, no member/debt
 data, no auth details ever go into it; see ``app.services.saving_tips_service``
 for how it's assembled.
 
-Every number Qwen could get wrong (cents-to-rubles conversion, percentages,
+Every number the model could get wrong (cents-to-rubles conversion, percentages,
 month-to-month change) is pre-calculated and pre-formatted by the backend
-into a ``*_display`` string using :mod:`app.utils.money` — Qwen only ever
-copies these strings into its prose, it never sees a raw cents integer or a
-raw ratio to convert or round itself. ``SavingTipsOut`` is both what Qwen
+into a ``*_display`` string using :mod:`app.utils.money` — the model only
+ever copies these strings into its prose, it never sees a raw cents integer or a
+raw ratio to convert or round itself. ``SavingTipsOut`` is both what the model
 must return and what the API responds with — the same shape, so no extra
 mapping step, and it carries no numeric fields at all: only free-text title/
-text strings and a type label, so a wrong number Qwen might type inside
+text strings and a type label, so a wrong number the model might type inside
 ``text`` can never be parsed back out and used anywhere else in the app.
 """
 
@@ -36,7 +36,7 @@ class SavingTipsTrend(BaseModel):
 
     Only ever built when a safe comparison exists (see
     ``app.services.saving_tips_service._build_trend``) — absent otherwise, so
-    Qwen is never tempted to invent a trend out of a single data point.
+    the model is never tempted to invent a trend out of a single data point.
     """
 
     from_label: str

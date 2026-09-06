@@ -1,12 +1,12 @@
 """Voice draft resolution logic.
 
-GigaAM and Ollama are monkeypatched — this is not a test of the local model
+GigaAM and GigaChat are monkeypatched — this is not a test of the speech model
 weights, it is a test of the pure resolution logic: turning whatever the LLM
 said into a draft where payer/participants/category/split are either
 resolved against real group data and validated, or flagged for the user to
 fix in the existing confirmation UI, with no guessing anywhere.
 
-Real-model coverage (does Qwen actually produce this shape for these exact
+Real-model coverage (does GigaChat actually produce this shape for these exact
 transcripts) lives in ``test_ai_smoke.py``, which runs against the live local
 models only when explicitly asked for.
 """
@@ -22,7 +22,7 @@ from app.core.errors import BadRequest
 from app.models.group import Group
 from app.models.user import User
 from app.schemas.voice import LLMExpenseExtraction
-from app.services import gigaam_service, ollama_service, voice_service
+from app.services import gigaam_service, gigachat_service, voice_service
 
 
 @pytest.fixture()
@@ -70,7 +70,7 @@ def _stub_pipeline(
 ) -> None:
     monkeypatch.setattr(voice_service.gigaam_service, "transcribe", lambda _audio: transcript)
     monkeypatch.setattr(
-        voice_service.ollama_service,
+        voice_service.gigachat_service,
         "extract_expense",
         lambda _transcript, _categories: extraction,
     )
@@ -278,9 +278,9 @@ def test_llm_failure_degrades_gracefully_instead_of_erroring(
     )
 
     def _boom(_transcript: str, _categories: object) -> LLMExpenseExtraction:
-        raise ollama_service.OllamaError("Ollama недоступна")
+        raise gigachat_service.GigaChatError("GigaChat недоступен")
 
-    monkeypatch.setattr(voice_service.ollama_service, "extract_expense", _boom)
+    monkeypatch.setattr(voice_service.gigachat_service, "extract_expense", _boom)
 
     draft = voice_service.build_draft(db, group=group, actor=anya, audio_bytes=b"fake-audio")
 
@@ -293,7 +293,7 @@ def test_llm_failure_degrades_gracefully_instead_of_erroring(
     assert draft.payer.value.user.id == anya.id
     # The user-facing warning names no model — see the same wording in the UI.
     assert any("AI помощник" in warning for warning in draft.warnings)
-    assert not any("Qwen" in warning or "Ollama" in warning for warning in draft.warnings)
+    assert not any("GigaChat" in warning or "Giga" in warning for warning in draft.warnings)
 
 
 # -------------------------------------------------------------------- title
@@ -349,7 +349,7 @@ def test_explicit_title_is_kept_over_category_fallback(
 def test_missing_title_and_unresolved_category_leaves_title_blank(
     monkeypatch: pytest.MonkeyPatch, db: Session, group: Group, people: tuple[User, User, User]
 ) -> None:
-    """No title and no category to fall back to (Ollama unreachable, so the
+    """No title and no category to fall back to (GigaChat unreachable, so the
     category is genuinely unresolved) — title stays ``None`` rather than
     inventing anything; the confirmation form still asks for it by hand."""
     anya, *_ = people
@@ -358,9 +358,9 @@ def test_missing_title_and_unresolved_category_leaves_title_blank(
     )
 
     def _boom(_transcript: str, _categories: object) -> LLMExpenseExtraction:
-        raise ollama_service.OllamaError("Ollama недоступна")
+        raise gigachat_service.GigaChatError("GigaChat недоступен")
 
-    monkeypatch.setattr(voice_service.ollama_service, "extract_expense", _boom)
+    monkeypatch.setattr(voice_service.gigachat_service, "extract_expense", _boom)
 
     draft = voice_service.build_draft(db, group=group, actor=anya, audio_bytes=b"fake-audio")
 

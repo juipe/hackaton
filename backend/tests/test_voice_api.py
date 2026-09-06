@@ -1,8 +1,8 @@
 """Voice expense draft endpoint.
 
 Exercises the route through the real HTTP/auth/CSRF/membership stack, with
-GigaAM and Ollama monkeypatched so the test suite never needs a model or a
-running Ollama server. Asserts the one hard rule of this endpoint: it never
+GigaAM and GigaChat monkeypatched so the test suite never needs a speech
+model or an API key. Asserts the one hard rule of this endpoint: it never
 creates an expense, only an ephemeral draft.
 """
 
@@ -43,7 +43,7 @@ def _stub_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda _audio: "Заплатил 500 рублей за обед",
     )
     monkeypatch.setattr(
-        voice_service.ollama_service,
+        voice_service.gigachat_service,
         "extract_expense",
         lambda _transcript, _categories: LLMExpenseExtraction(
             title="Обед", amount="500", category_slug="food", payer_name="я"

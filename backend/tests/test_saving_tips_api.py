@@ -1,8 +1,8 @@
 """AI saving-tips dashboard endpoint.
 
 Exercises ``POST /api/dashboard/saving-tips`` through the real HTTP/auth
-stack, with ``ollama_service.generate_saving_tips`` monkeypatched so the
-suite never needs a running Ollama server. Reuses the same ``world`` fixture
+stack, with ``gigachat_service.generate_saving_tips`` monkeypatched so the
+suite never needs the GigaChat API or a key. Reuses the same ``world`` fixture
 shape as ``test_dashboard_api.py`` (two groups, real expenses) so the period
 and group-scoping behaviour is exercised against real data, not a mock.
 """
@@ -22,7 +22,7 @@ from app.models.expense import Expense, SplitMode
 from app.models.group import Group
 from app.models.user import User
 from app.schemas.saving_tips import SavingTip, SavingTipsOut
-from app.services import ollama_service
+from app.services import gigachat_service
 from app.utils.time import add_months, start_of_month, utcnow
 
 
@@ -84,7 +84,7 @@ def world(
 
 def _stub_success(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        ollama_service,
+        gigachat_service,
         "generate_saving_tips",
         lambda _payload: SavingTipsOut(
             tips=[
@@ -149,9 +149,9 @@ def test_falls_back_to_generic_tips_when_the_llm_fails(
     world: World,
 ) -> None:
     def _raise(_payload: object) -> SavingTipsOut:
-        raise ollama_service.OllamaError("boom")
+        raise gigachat_service.GigaChatError("boom")
 
-    monkeypatch.setattr(ollama_service, "generate_saving_tips", _raise)
+    monkeypatch.setattr(gigachat_service, "generate_saving_tips", _raise)
 
     response = api_client(world.alice).post("/api/dashboard/saving-tips")
 
@@ -173,7 +173,7 @@ def test_falls_back_without_calling_the_llm_when_there_is_no_spending(
         called = True
         raise AssertionError("should not be called for an account with no expenses")
 
-    monkeypatch.setattr(ollama_service, "generate_saving_tips", _spy)
+    monkeypatch.setattr(gigachat_service, "generate_saving_tips", _spy)
 
     response = api_client(make_user()).post("/api/dashboard/saving-tips")
 
@@ -200,7 +200,7 @@ def test_group_id_scopes_the_analysed_data(
             ]
         )
 
-    monkeypatch.setattr(ollama_service, "generate_saving_tips", _capture)
+    monkeypatch.setattr(gigachat_service, "generate_saving_tips", _capture)
 
     response = api_client(world.alice).post(
         "/api/dashboard/saving-tips", params={"group_id": str(world.family.id)}
@@ -237,7 +237,7 @@ def test_group_scope_never_includes_another_groups_spending(
             ]
         )
 
-    monkeypatch.setattr(ollama_service, "generate_saving_tips", _capture)
+    monkeypatch.setattr(gigachat_service, "generate_saving_tips", _capture)
 
     response = api_client(world.alice).post(
         "/api/dashboard/saving-tips", params={"group_id": str(world.trip.id)}
@@ -279,7 +279,7 @@ def test_custom_period_excludes_data_outside_the_window(
         called = True
         raise AssertionError("should not be called — no spending inside this window")
 
-    monkeypatch.setattr(ollama_service, "generate_saving_tips", _spy)
+    monkeypatch.setattr(gigachat_service, "generate_saving_tips", _spy)
 
     response = api_client(world.alice).post(
         "/api/dashboard/saving-tips",
@@ -307,7 +307,7 @@ def test_sends_no_ids_or_member_data_to_the_model(
             ]
         )
 
-    monkeypatch.setattr(ollama_service, "generate_saving_tips", _capture)
+    monkeypatch.setattr(gigachat_service, "generate_saving_tips", _capture)
 
     api_client(world.alice).post("/api/dashboard/saving-tips")
 
@@ -369,7 +369,7 @@ def test_odd_cents_are_converted_to_rubles_before_reaching_the_model(
             ]
         )
 
-    monkeypatch.setattr(ollama_service, "generate_saving_tips", _capture)
+    monkeypatch.setattr(gigachat_service, "generate_saving_tips", _capture)
 
     # An odd, easy-to-corrupt amount — 500 cents is 5,00 ₽, not "500 ₽".
     db.add(
@@ -455,7 +455,7 @@ def test_trend_percentage_is_calculated_by_the_backend(
             ]
         )
 
-    monkeypatch.setattr(ollama_service, "generate_saving_tips", _capture)
+    monkeypatch.setattr(gigachat_service, "generate_saving_tips", _capture)
 
     response = api_client(alice).post(
         "/api/dashboard/saving-tips", params={"group_id": str(group.id)}
@@ -507,7 +507,7 @@ def test_no_trend_when_only_one_month_has_data(
             ]
         )
 
-    monkeypatch.setattr(ollama_service, "generate_saving_tips", _capture)
+    monkeypatch.setattr(gigachat_service, "generate_saving_tips", _capture)
 
     response = api_client(alice).post(
         "/api/dashboard/saving-tips", params={"group_id": str(group.id)}

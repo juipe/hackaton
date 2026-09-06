@@ -50,21 +50,21 @@ services:
       COOKIE_NAME: ${COOKIE_NAME:-skladchina_session}
       CSRF_COOKIE_NAME: ${CSRF_COOKIE_NAME:-skladchina_csrf}
       CSRF_HEADER_NAME: ${CSRF_HEADER_NAME:-X-CSRF-Token}
-      # AI pipeline — both components run locally, no external API, no API key.
       # Speech-to-text (GigaAM-v3) runs inside this container; the weights are
       # downloaded on the first voice request and cached in the volume below.
       GIGAAM_MODEL: ${GIGAAM_MODEL:-ai-sage/GigaAM-v3}
       GIGAAM_REVISION: ${GIGAAM_REVISION:-e2e_rnnt}
       GIGAAM_DEVICE: ${GIGAAM_DEVICE:-cpu}
-      # The LLM (Qwen) runs in Ollama on the host, not in a container —
-      # host.docker.internal is how this container reaches it.
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5:9b}
-      OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-120}
-    extra_hosts:
-      # Lets host.docker.internal resolve on Linux too (macOS/Windows have it
-      # built in); harmless no-op there.
-      - "host.docker.internal:host-gateway"
+      # The LLM is the GigaChat API — a remote HTTPS service, so nothing extra
+      # runs on the host or in a container. GIGACHAT_CREDENTIALS is a SECRET:
+      # it comes from .env (which is gitignored) and has no default here on
+      # purpose — an empty key degrades the AI features, it does not break the
+      # app. Never write the real key into this file.
+      GIGACHAT_CREDENTIALS: ${GIGACHAT_CREDENTIALS:-}
+      GIGACHAT_SCOPE: ${GIGACHAT_SCOPE:-GIGACHAT_API_PERS}
+      GIGACHAT_MODEL: ${GIGACHAT_MODEL:-GigaChat-3-Ultra}
+      GIGACHAT_BASE_URL: ${GIGACHAT_BASE_URL:-https://api.giga.chat}
+      GIGACHAT_TIMEOUT_SECONDS: ${GIGACHAT_TIMEOUT_SECONDS:-45}
     volumes:
       - skladchina_hf_cache:/home/skladchina/.cache/huggingface
     ports:

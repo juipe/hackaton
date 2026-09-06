@@ -17,19 +17,23 @@ os.environ.setdefault("FRONTEND_BASE_URL", "http://testserver")
 
 # Point the LLM at a port nothing can be listening on, so the suite is hermetic:
 # every test that exercises an AI code path either monkeypatches the call or
-# expects the failure path, and neither should depend on what happens to be
-# running on the developer's machine. Without this, creating an expense in any
-# test fires the real debt-reminder background call at whatever serves
-# OLLAMA_BASE_URL — which, on a machine with Ollama actually running, turns a
-# 3-minute suite into an hour of live model inference. Port 0 cannot be
-# connected to, so it fails immediately rather than waiting out the timeout.
+# expects the failure path, and neither should depend on the developer's
+# machine — or, now that the provider is a remote API, on the network or on a
+# real API key. Without this, creating an expense in any test would fire the
+# real debt-reminder background call at GigaChat: a billed request per test.
+# Port 0 cannot be connected to, so it fails immediately rather than waiting
+# out the timeout, and the blank credentials mean the failure happens before
+# any request is even attempted.
 #
 # test_ai_smoke.py is the deliberate exception: it exists to talk to the real
-# Ollama, and it only runs when SKLADCHINA_AI_SMOKE=1 is set explicitly, so
+# GigaChat, and it only runs when SKLADCHINA_AI_SMOKE=1 is set explicitly, so
 # that flag also turns this guard off.
 if os.environ.get("SKLADCHINA_AI_SMOKE") != "1":
-    os.environ["OLLAMA_BASE_URL"] = "http://127.0.0.1:0"
-    os.environ["OLLAMA_TIMEOUT_SECONDS"] = "5"
+    os.environ["GIGACHAT_CREDENTIALS"] = ""
+    os.environ["GIGACHAT_BASE_URL"] = "http://127.0.0.1:0"
+    os.environ["GIGACHAT_AUTH_URL"] = "http://127.0.0.1:0/api/v2/oauth"
+    os.environ["GIGACHAT_TIMEOUT_SECONDS"] = "5"
+    os.environ["GIGACHAT_AUTH_TIMEOUT_SECONDS"] = "5"
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

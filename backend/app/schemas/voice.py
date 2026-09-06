@@ -1,7 +1,7 @@
 """Voice-to-expense-draft schemas.
 
 The LLM extraction schema (:class:`LLMExpenseExtraction`) is deliberately
-UUID-free — Qwen only ever produces names, free text and plain numbers. Every
+UUID-free — the model only ever produces names, free text and plain numbers. Every
 id that ends up in the draft comes from resolving that text against the
 group's real members and categories in ``app.services.voice_service``, never
 from the model itself.
@@ -62,7 +62,7 @@ class ParticipantsResolution(BaseModel):
 
 
 class LLMParticipantShare(BaseModel):
-    """One participant's share exactly as Qwen heard it — a name and a raw
+    """One participant's share exactly as the model heard it — a name and a raw
     number whose unit depends on the extraction's ``split_mode``."""
 
     name: str = Field(description="Имя участника как в речи, или 'я' для себя")
@@ -72,7 +72,7 @@ class LLMParticipantShare(BaseModel):
 
 
 class LLMExpenseExtraction(BaseModel):
-    """Raw structured output from Qwen. Names, text and plain numbers only,
+    """Raw structured output from the LLM. Names, text and plain numbers only,
     never ids — see ``voice_service`` for how each field is resolved and
     validated against real data before it reaches the frontend."""
 

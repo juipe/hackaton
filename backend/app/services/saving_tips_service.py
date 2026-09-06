@@ -3,16 +3,16 @@
 Deliberately does not re-implement any aggregate: it calls the existing
 :mod:`app.services.dashboard_service` functions for the same period/group
 scope the dashboard itself uses, trims the result down to the fields that are
-actually useful for a saving recommendation, and hands that to Qwen via
-``ollama_service.generate_saving_tips``. No member/debt/balance data and no
+actually useful for a saving recommendation, and hands that to the LLM via
+``gigachat_service.generate_saving_tips``. No member/debt/balance data and no
 ids ever leave this module — only spending totals, category shares and a
 two-month trend.
 
-Every number in that payload is pre-formatted here, in Python, before Qwen
+Every number in that payload is pre-formatted here, in Python, before the model
 ever sees it: cents-to-rubles conversion, percentages and the month-to-month
 change are all computed with :class:`~decimal.Decimal` and
 :func:`app.utils.money.format_money`, never left for the model to work out.
-Qwen only copies the resulting strings into prose — it cannot mis-convert,
+The model only copies the resulting strings into prose — it cannot mis-convert,
 round, or invent a number it was never asked to calculate in the first place.
 See the real-world failures this fixes: a 70 RUB change reported as "19,000
 RUB", 5 RUB reported as "500 RUB", and a 220->300 RUB change reported with
@@ -36,11 +36,11 @@ from app.schemas.saving_tips import (
     SavingTipsOut,
     SavingTipsTrend,
 )
-from app.services import dashboard_service, ollama_service
+from app.services import dashboard_service, gigachat_service
 from app.utils.money import format_money
 
 #: Used both when there isn't enough spending data to say anything personal,
-#: and as the safety net when Ollama is unreachable or misbehaves — the
+#: and as the safety net when GigaChat is unreachable or misbehaves — the
 #: dashboard must never break because the local model did.
 FALLBACK_TIPS = SavingTipsOut(
     tips=[
@@ -92,7 +92,7 @@ def _build_trend(over_time: SpendingOverTimeOut, currency: str) -> SavingTipsTre
 
     Only built when there are at least two months of data *and* the earlier
     month has nonzero spending (otherwise "percent change" is undefined) —
-    this is exactly the condition the system prompt tells Qwen it may talk
+    this is exactly the condition the system prompt tells the model it may talk
     about a trend under, so the model is never left to decide for itself
     whether a comparison is safe to make.
     """
@@ -163,8 +163,8 @@ def generate(
 
     payload = _build_input(summary, category_breakdown, over_time)
     try:
-        return ollama_service.generate_saving_tips(payload)
-    except ollama_service.OllamaError:
+        return gigachat_service.generate_saving_tips(payload)
+    except gigachat_service.GigaChatError:
         return FALLBACK_TIPS
 
 

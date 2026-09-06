@@ -30,7 +30,7 @@ class Notification(Base):
     not a live join — the reminder describes what happened at that moment, so
     a later rename of the expense or the group must not change it. ``message``
     is filled with a deterministic fallback immediately, then may be replaced
-    by a Qwen-generated one in the background (see
+    by a GigaChat-generated one in the background (see
     ``app.services.debt_reminder_service``); either way the row exists — and
     is visible once ``available_at`` passes — the instant the expense commits.
     """
@@ -65,7 +65,7 @@ class Notification(Base):
     amount_due_cents: Mapped[int] = mapped_column(BigInteger, nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, default="RUB")
     message: Mapped[str] = mapped_column(Text, nullable=False)
-    # "fallback" until the background Qwen call (if any) replaces the message —
+    # "fallback" until the background GigaChat call (if any) replaces the message —
     # not exposed over the API, just lets tests and operators see which path a
     # given reminder took.
     source: Mapped[str] = mapped_column(String(16), nullable=False, default="fallback")

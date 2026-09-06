@@ -83,11 +83,11 @@ def create_group_expense(
         participants=payload.participants,
     )
     # The reminder rows (with a deterministic fallback message already in them)
-    # are already committed above. Wording them with Qwen instead happens here,
-    # after the response is on its way — the request never waits on Ollama.
+    # are already committed above. Wording them with the LLM instead happens
+    # here, after the response is on its way — the request never waits on it.
     notification_ids = notification_repo.ids_for_expense(db, expense.id)
     if notification_ids:
-        background_tasks.add_task(debt_reminder_service.enhance_with_qwen, notification_ids)
+        background_tasks.add_task(debt_reminder_service.enhance_with_llm, notification_ids)
     return expense_service.build_expense_out(expense, user.id)
 
 

@@ -3,7 +3,7 @@
 Exercises the feature through the real HTTP stack wherever possible (expense
 creation, the notifications endpoints, auth), the same way ``test_expenses_api.py``
 and ``test_invariants.py`` do. ``TestClient`` runs ``BackgroundTasks``
-synchronously before the response comes back, so the Qwen-enhancement step is
+synchronously before the response comes back, so the LLM-enhancement step is
 deterministic here without any sleeping or polling.
 """
 
@@ -26,7 +26,7 @@ from app.models.notification import Notification
 from app.models.user import User
 from app.repositories import notification_repo
 from app.schemas.notification import DebtReminderOut
-from app.services import debt_reminder_service, ollama_service
+from app.services import debt_reminder_service, gigachat_service
 from app.utils.time import utcnow
 
 
@@ -413,7 +413,7 @@ def test_duplicate_reminder_is_never_created_for_the_same_expense_and_debtor(
 # --------------------------------------------------------------- restart safety
 
 
-def test_reminder_survives_in_a_fresh_session_without_any_qwen_step(
+def test_reminder_survives_in_a_fresh_session_without_any_llm_step(
     db: Session,
     people: tuple[User, User, User],
     group: Group,
@@ -425,16 +425,16 @@ def test_reminder_survives_in_a_fresh_session_without_any_qwen_step(
     Nothing about it — its facts, its fallback wording, or the 10-second
     delay — depends on any state held in the process that created it. This
     simulates a restart between the expense committing and the background
-    Qwen step ever running: a brand-new ``SessionLocal()`` (the same one a
+    LLM step ever running: a brand-new ``SessionLocal()`` (the same one a
     freshly started process would open) sees a complete notification with no
     scheduled job or in-memory timer required to produce it.
     """
     from app.db.session import SessionLocal
 
-    # No Qwen call happens at all in this test — proving the row it inspects
+    # No LLM call happens at all in this test — proving the row it inspects
     # was never dependent on the background step having run.
     monkeypatch.setattr(
-        ollama_service,
+        gigachat_service,
         "generate_debt_reminder",
         lambda _data: pytest.fail("must not be called before the process 'restarts'"),
     )
@@ -480,10 +480,10 @@ def test_reminder_survives_in_a_fresh_session_without_any_qwen_step(
         assert notification.message  # a complete, displayable sentence already
 
 
-# --------------------------------------------------------------- Qwen wording
+# ------------------------------------------------------------ GigaChat wording
 
 
-def test_qwen_success_replaces_fallback_message(
+def test_llm_success_replaces_fallback_message(
     db: Session,
     api_client: Callable[[User], TestClient],
     people: tuple[User, User, User],
@@ -492,7 +492,7 @@ def test_qwen_success_replaces_fallback_message(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        ollama_service,
+        gigachat_service,
         "generate_debt_reminder",
         lambda _data: DebtReminderOut(message="Не забудьте вернуть долг за ужин!"),
     )
@@ -507,10 +507,10 @@ def test_qwen_success_replaces_fallback_message(
     )
     assert notification is not None
     assert notification.message == "Не забудьте вернуть долг за ужин!"
-    assert notification.source == "qwen"
+    assert notification.source == "gigachat"
 
 
-def test_qwen_failure_keeps_deterministic_fallback(
+def test_llm_failure_keeps_deterministic_fallback(
     db: Session,
     api_client: Callable[[User], TestClient],
     people: tuple[User, User, User],
@@ -519,9 +519,9 @@ def test_qwen_failure_keeps_deterministic_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def _raise(_data: object) -> None:
-        raise ollama_service.OllamaError("Ollama timed out")
+        raise gigachat_service.GigaChatError("GigaChat timed out")
 
-    monkeypatch.setattr(ollama_service, "generate_debt_reminder", _raise)
+    monkeypatch.setattr(gigachat_service, "generate_debt_reminder", _raise)
     ada, ben, _cleo = people
     client = api_client(ada)
 
@@ -539,7 +539,7 @@ def test_qwen_failure_keeps_deterministic_fallback(
     assert ada.name in notification.message
 
 
-def test_invalid_qwen_response_falls_back(
+def test_invalid_llm_response_falls_back(
     db: Session,
     api_client: Callable[[User], TestClient],
     people: tuple[User, User, User],
@@ -547,15 +547,15 @@ def test_invalid_qwen_response_falls_back(
     food: Category,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An invalid Qwen response surfaces as ``OllamaError`` (see
-    ``test_ollama_service.py``); this proves the notification pipeline treats
-    that exactly like any other Ollama failure — deterministic fallback, never
+    """An invalid model response surfaces as ``GigaChatError`` (see
+    ``test_gigachat_service.py``); this proves the notification pipeline treats
+    that exactly like any other GigaChat failure — deterministic fallback, never
     a broken expense request."""
 
     def _raise(_data: object) -> None:
-        raise ollama_service.OllamaError("Модель вернула данные неожиданной формы")
+        raise gigachat_service.GigaChatError("Модель вернула данные неожиданной формы")
 
-    monkeypatch.setattr(ollama_service, "generate_debt_reminder", _raise)
+    monkeypatch.setattr(gigachat_service, "generate_debt_reminder", _raise)
     ada, ben, _cleo = people
     client = api_client(ada)
 
@@ -570,7 +570,7 @@ def test_invalid_qwen_response_falls_back(
     assert notification.source == "fallback"
 
 
-def test_expense_creation_succeeds_even_if_qwen_blows_up(
+def test_expense_creation_succeeds_even_if_the_llm_blows_up(
     api_client: Callable[[User], TestClient],
     people: tuple[User, User, User],
     group: Group,
@@ -578,15 +578,15 @@ def test_expense_creation_succeeds_even_if_qwen_blows_up(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def _explode(_data: object) -> None:
-        raise RuntimeError("something Ollama-shaped went very wrong")
+        raise RuntimeError("something provider-shaped went very wrong")
 
-    monkeypatch.setattr(ollama_service, "generate_debt_reminder", _explode)
+    monkeypatch.setattr(gigachat_service, "generate_debt_reminder", _explode)
     ada, ben, _cleo = people
     client = api_client(ada)
 
     body = _payload(category=food, paid_by=ada, participants=[(ada, None), (ben, None)])
-    # A completely unexpected exception in the background Qwen step (not just
-    # an `OllamaError`) must still never take the already-sent response down
+    # A completely unexpected exception in the background LLM step (not just
+    # a `GigaChatError`) must still never take the already-sent response down
     # with it.
     response = client.post(f"/api/groups/{group.id}/expenses", json=body)
     assert response.status_code == 201

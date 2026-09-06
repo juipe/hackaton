@@ -31,10 +31,9 @@ class Settings(BaseSettings):
 
     invite_expire_hours: int = 24 * 14
 
-    # AI pipeline — GigaAM (speech-to-text) and Qwen via Ollama (structured
-    # extraction, saving tips, debt-reminder wording) both run locally, no
-    # external AI API is ever called and no API key exists. See
-    # services/gigaam_service.py and services/ollama_service.py.
+    # AI pipeline — GigaAM (speech-to-text) runs locally, GigaChat (structured
+    # extraction, saving tips, debt-reminder wording) is a remote API. See
+    # services/gigaam_service.py and services/gigachat_service.py.
     #
     # GigaAM runs in-process (transformers + torch); the weights are pulled
     # from Hugging Face on first use and cached under HF_HOME.
@@ -42,11 +41,34 @@ class Settings(BaseSettings):
     gigaam_revision: str = "e2e_rnnt"
     gigaam_device: str = "cpu"
     gigaam_ffmpeg_binary: str = "ffmpeg"
-    # Ollama runs on the host, not in a container — inside Docker it is reached
-    # at host.docker.internal (see docker-compose.yml).
-    ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "qwen3.5:9b"
-    ollama_timeout_seconds: int = 120
+
+    # GigaChat — the LLM provider. `gigachat_credentials` is the base64
+    # Authorization Key and is a SECRET: it lives in .env only, never in the
+    # image, the repo or a log line. It is exchanged at `gigachat_auth_url`
+    # for a 30-minute access token, which the service caches and refreshes on
+    # its own; inference goes to `gigachat_base_url` + /v1/chat/completions.
+    # Empty credentials are not a crash — every AI caller already degrades
+    # gracefully, so the app still runs (without AI) with no key configured.
+    gigachat_credentials: str = ""
+    gigachat_scope: str = "GIGACHAT_API_PERS"
+    gigachat_model: str = "GigaChat-3-Ultra"
+    gigachat_base_url: str = "https://api.giga.chat"
+    # The only documented token endpoint; api.giga.chat does not serve one.
+    gigachat_auth_url: str = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
+    # A remote API, not local inference: seconds, not minutes. Must stay below
+    # the reverse proxy's proxy_read_timeout (see frontend/nginx.conf).
+    gigachat_timeout_seconds: int = 45
+    gigachat_auth_timeout_seconds: int = 15
+    gigachat_temperature: float = 0.1
+    #: Ask for `response_format: json_schema`. On by default; an escape hatch
+    #: for a deployment whose model build does not accept the parameter.
+    gigachat_structured_output: bool = True
+    #: Extra CA bundle for GigaChat's TLS chain. Empty means the copy of the
+    #: Russian Trusted CA shipped in app/certs — see gigachat_service.
+    gigachat_ca_bundle: str = ""
+    #: Never turn this off outside a broken corporate-proxy emergency.
+    gigachat_verify_ssl: bool = True
+
     voice_max_upload_bytes: int = 15 * 1024 * 1024
 
     # Debt-reminder notifications — see services/debt_reminder_service.py. The

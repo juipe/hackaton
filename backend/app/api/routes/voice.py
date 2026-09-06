@@ -6,7 +6,7 @@ expense — it only returns an ephemeral draft for the frontend to confirm
 ``POST /groups/{group_id}/expenses`` route.
 
 Defined as a sync ``def`` (not ``async``) so FastAPI runs it in a threadpool —
-GigaAM transcription and the Ollama call are both blocking, CPU/IO-bound
+GigaAM transcription and the GigaChat call are both blocking, CPU/IO-bound
 work that must not block the event loop.
 """
 

@@ -1,9 +1,9 @@
 """Voice-to-expense-draft orchestration.
 
 Turns a recorded voice note into an ephemeral, validated expense draft: local
-GigaAM transcription -> local Qwen extraction (via Ollama) -> resolution of
+GigaAM transcription -> GigaChat extraction -> resolution of
 payer, participants and category against the group's real members and
-categories, plus validation of whatever split Qwen thought it heard. This
+categories, plus validation of whatever split the model thought it heard. This
 module never writes to the database and never creates an expense — that only
 happens once the user confirms the draft through the existing expense
 creation flow (``expense_service.create_expense``).
@@ -42,7 +42,7 @@ from app.schemas.voice import (
     ResolvedParticipant,
     VoiceExpenseDraftOut,
 )
-from app.services import gigaam_service, ollama_service
+from app.services import gigaam_service, gigachat_service
 from app.utils.money import str_to_cents
 
 #: Words a speaker uses to refer to themself instead of naming who paid.
@@ -71,15 +71,15 @@ def build_draft(
     categories = category_repo.list_all(db)
 
     try:
-        extraction = ollama_service.extract_expense(transcript, categories)
-        ollama_succeeded = True
-    except ollama_service.OllamaError:
+        extraction = gigachat_service.extract_expense(transcript, categories)
+        llm_succeeded = True
+    except gigachat_service.GigaChatError:
         warnings.append(
             "Твой AI помощник сейчас недоступен — распознанный текст сохранён, "
             "заполните поля вручную"
         )
         extraction = LLMExpenseExtraction()
-        ollama_succeeded = False
+        llm_succeeded = False
 
     split_mode = _resolve_split_mode(extraction.split_mode)
     participants = _resolve_participants(extraction.participants, members, actor)
@@ -93,7 +93,7 @@ def build_draft(
 
     _validate_split(split_mode, amount_cents, participants.resolved, warnings)
 
-    category = _resolve_category(extraction.category_slug, categories, ollama_succeeded)
+    category = _resolve_category(extraction.category_slug, categories, llm_succeeded)
     title = _resolve_title(extraction.title, category)
 
     return VoiceExpenseDraftOut(
@@ -249,16 +249,16 @@ def _resolve_participants(
 
 
 def _resolve_category(
-    raw_slug: str | None, categories: list[Category], ollama_succeeded: bool
+    raw_slug: str | None, categories: list[Category], llm_succeeded: bool
 ) -> FieldResolution[CategoryOut]:
-    """Qwen picks a category by slug from the real list — see the prompt in
-    ``ollama_service``. A slug that matches resolves directly; the model is
+    """The model picks a category by slug from the real list — see the prompt
+    in ``gigachat_service``. A slug that matches resolves directly; the model is
     instructed to fall back to "other" itself when nothing fits, so an
     unmatched slug here means it slipped up, not that the transcript was
     unclear — falling back to "other" on our side too keeps that promise
     ("only unresolved on a genuine failure") even then.
 
-    When Qwen never ran at all (``ollama_succeeded`` is False), there is no
+    When the model never ran at all (``llm_succeeded`` is False), there is no
     semantic judgement to fall back on, so the category stays unresolved —
     that is the genuine technical/data problem this status is for.
     """
@@ -269,7 +269,7 @@ def _resolve_category(
             status="resolved", value=CategoryOut.model_validate(match)
         )
 
-    if ollama_succeeded:
+    if llm_succeeded:
         fallback = next((c for c in categories if c.slug.casefold() == "other"), None)
         if fallback is not None:
             return FieldResolution[CategoryOut](
@@ -298,7 +298,7 @@ def _validate_split(
     warnings: list[str],
 ) -> None:
     """Never corrects anything — only tells the user, via ``warnings``, that
-    the numbers Qwen heard don't add up, so they know to check the
+    the numbers the model heard don't add up, so they know to check the
     confirmation form before saving rather than trusting it blindly."""
     if split_mode == SplitMode.EXACT:
         _validate_exact(amount_cents, resolved, warnings)

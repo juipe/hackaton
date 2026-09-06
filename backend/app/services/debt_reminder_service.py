@@ -14,10 +14,10 @@ Two separate concerns, run at two different times:
   sentence. The 10-second delay is a plain ``available_at`` column, not a
   timer or a scheduled job — nothing has to survive in memory across a
   restart for it to work.
-- :func:`enhance_with_qwen` runs afterwards, as a ``BackgroundTasks`` job with
+- :func:`enhance_with_llm` runs afterwards, as a ``BackgroundTasks`` job with
   its own DB session (the request's session is already closed by the time
   background tasks run), and best-effort replaces the fallback message with
-  one from Qwen. Its failure is invisible to both the expense request and the
+  one from GigaChat. Its failure is invisible to both the expense request and the
   notification's availability — see module docstring above.
 """
 
@@ -36,7 +36,7 @@ from app.models.group import Group
 from app.models.notification import Notification
 from app.repositories import notification_repo
 from app.schemas.notification import DebtReminderInput, NotificationOut
-from app.services import ollama_service
+from app.services import gigachat_service
 from app.services.split_engine import SplitResult
 from app.utils.money import cents_to_str, format_money
 from app.utils.time import utcnow
@@ -44,7 +44,7 @@ from app.utils.time import utcnow
 logger = logging.getLogger("skladchina.debt_reminders")
 
 FALLBACK_SOURCE = "fallback"
-QWEN_SOURCE = "qwen"
+LLM_SOURCE = "gigachat"
 
 
 def _fallback_message(
@@ -114,14 +114,14 @@ def create_reminders_for_expense(
     return created
 
 
-def enhance_with_qwen(notification_ids: Sequence[uuid.UUID]) -> None:
-    """Best-effort: replace each reminder's fallback message with a Qwen one.
+def enhance_with_llm(notification_ids: Sequence[uuid.UUID]) -> None:
+    """Best-effort: replace each reminder's fallback message with a GigaChat one.
 
     Runs as a background task, after the expense response has already been
     sent — it opens its own session because the request's is gone by then.
-    Never raises: an unreachable/misbehaving Ollama leaves the deterministic
+    Never raises: an unreachable/misbehaving GigaChat leaves the deterministic
     fallback in place, which is already a complete, correct notification, and
-    a broken Ollama reply (or anything else going wrong per-notification)
+    a broken GigaChat reply (or anything else going wrong per-notification)
     is caught and logged rather than left to fail the background task —
     the expense request this runs after has already succeeded and must never
     be affected by it.
@@ -141,14 +141,14 @@ def enhance_with_qwen(notification_ids: Sequence[uuid.UUID]) -> None:
                     payer=notification.payer_name,
                     group=notification.group_name,
                 )
-                result = ollama_service.generate_debt_reminder(payload)
+                result = gigachat_service.generate_debt_reminder(payload)
                 notification.message = result.message
-                notification.source = QWEN_SOURCE
+                notification.source = LLM_SOURCE
                 db.commit()
-            except ollama_service.OllamaError:
+            except gigachat_service.GigaChatError:
                 db.rollback()
             except Exception:  # a background job must never crash the process
-                logger.exception("Failed to word debt reminder %s via Qwen", notification_id)
+                logger.exception("Failed to word debt reminder %s via GigaChat", notification_id)
                 db.rollback()
 
 
@@ -165,7 +165,7 @@ def mark_all_read(db: Session, user_id: uuid.UUID) -> None:
 
 __all__ = [
     "create_reminders_for_expense",
-    "enhance_with_qwen",
+    "enhance_with_llm",
     "list_for_user",
     "mark_all_read",
 ]

@@ -48,6 +48,19 @@ ruff check .
 ruff check . --fix
 ```
 
+The whole default suite mocks the AI layer on purpose — it never downloads GigaAM's weights,
+and it never spends a billed GigaChat request or needs a key (`conftest.py` blanks
+`GIGACHAT_CREDENTIALS` and points the base URL at a dead port).
+`tests/test_ai_smoke.py` is the opposite and is skipped unless you ask for it:
+
+```bash
+# GigaChat only; the key comes from the environment, so export the root .env first
+set -a && . ../.env && set +a
+SKLADCHINA_AI_SMOKE=1 python -m pytest tests/test_ai_smoke.py -v
+SKLADCHINA_AI_SMOKE=1 SKLADCHINA_AI_SMOKE_AUDIO=/path/to/voice.webm \
+    python -m pytest tests/test_ai_smoke.py -v                              # + GigaAM
+```
+
 Migrations:
 
 ```bash
@@ -115,9 +128,9 @@ ever lives in `localStorage`. Every group-scoped route depends on `require_membe
 
 Expense deletion is soft (`deleted_at`), so group history and the activity feed stay intact.
 
-#### The two local AI runtimes
+#### The two AI runtimes
 
-Both models run on your own machines — no external AI API, no API key, anywhere:
+Speech-to-text runs on your own machine; the LLM is a remote API:
 
 - **`services/gigaam_service.py`** — speech-to-text with `ai-sage/GigaAM-v3`, loaded
   **in-process** through `transformers.AutoModel` (`trust_remote_code`, revision `e2e_rnnt` by
@@ -130,37 +143,43 @@ Both models run on your own machines — no external AI API, no API key, anywher
   (`transcribe_longform` would need pyannote.audio and a gated HF model behind a token — not a
   dependency here), so the duration is checked before inference and raises `AudioTooLongError`,
   the one STT failure whose message `voice_service` passes through to the user verbatim.
-- **`services/ollama_service.py`** — Qwen (`ollama_model`, default `qwen3.5:9b`) on a local
-  **Ollama server running on the host**, not in a container: `docker compose up` does not start
-  it, so `ollama serve` has to be running separately. Reached over `/api/generate` with
-  `format: "json"` and `think: False` (a hybrid-reasoning Qwen otherwise puts the whole answer
-  in a separate "thinking" field and leaves "response" empty). All three LLM use cases
-  (`extract_expense`, `generate_saving_tips`, `generate_debt_reminder`) go through it and raise
-  one error type, `OllamaError`.
+- **`services/gigachat_service.py`** — GigaChat (`gigachat_model`, pinned to
+  `GigaChat-3-Ultra`) over Sber's HTTPS API. Nothing runs locally and nothing extra has to be
+  started; what it needs instead is a key. Two hosts are involved: the base64 Authorization Key
+  (`gigachat_credentials`, a **secret** — `.env` only) is exchanged at `gigachat_auth_url`
+  (`ngw.devices.sberbank.ru:9443/api/v2/oauth`, still the only documented token endpoint) for a
+  30-minute access token, and inference goes to `gigachat_base_url` + `/v1/chat/completions`
+  (the OpenAI-compatible surface) with that token as a bearer. `_TokenCache` keeps the token
+  process-wide behind a lock and refreshes it a minute before expiry, so a completion is
+  normally one round trip; a 401 invalidates it and retries exactly once. All three LLM use
+  cases (`extract_expense`, `generate_saving_tips`, `generate_debt_reminder`) go through it,
+  ask for `response_format: {"type": "json_schema", ..., "strict": true}`, and raise one error
+  type, `GigaChatError`.
 
-Nothing waits on Ollama: each of the three callers degrades on `OllamaError` (see the fallbacks
-below). Config lives in `core/config.py` under `gigaam_*` / `ollama_*`.
+Nothing waits on GigaChat: each of the three callers degrades on `GigaChatError` (see the
+fallbacks below), so an empty `GIGACHAT_CREDENTIALS` is a supported configuration, not a
+crash. Config lives in `core/config.py` under `gigaam_*` / `gigachat_*`.
 
-Measured latency on this machine (Apple Silicon, Ollama, `qwen3.5:9b`): see the verification
-notes — a cold expense extraction is the slowest path, saving tips and debt reminders are
-quicker. GigaAM transcribes a 3-second clip in well under a second once loaded; the first call
-after a restart also pays the model load (~1 min including the first download).
+Measured latency (from the smoke tests): token acquisition ~0.2s, then free while cached;
+expense extraction ~1.8-2.9s; saving tips ~2.1s; debt reminder ~0.9s. GigaAM transcribes a
+3-second clip in well under a second once loaded; the first call after a restart also pays the
+model load (~1 min including the first download).
 
 #### Voice-to-expense pipeline (`services/voice_service.py`)
 
 `POST /groups/{group_id}/voice-expenses` (`api/routes/voice.py`) takes an audio upload and
 returns an ephemeral **draft** — it never writes to the database. The route handler is a sync
 `def`, not `async`, so FastAPI runs it in a threadpool: both GigaAM transcription and the
-Ollama call are blocking. Pipeline: local GigaAM transcription (`gigaam_service.py`) → local
-Qwen structured extraction over Ollama (`ollama_service.py`,
-prompted to return JSON) → `voice_service.build_draft` resolves the extracted payer/participant
+GigaChat call are blocking. Pipeline: local GigaAM transcription (`gigaam_service.py`) →
+GigaChat structured extraction (`gigachat_service.py`, JSON-schema constrained) →
+`voice_service.build_draft` resolves the extracted payer/participant
 names and category slug against the group's *real* members/categories (exact match, then
 substring/first-name match; ambiguous or no-match names come back as `ambiguous`/`unresolved`
 in the draft rather than being guessed at) and validates whatever split the model thought it
 heard. `ExpenseCreate` requires a title, so `_resolve_title` falls back to the *resolved
 category's* name (e.g. "Продукты") when the model returned none, and leaves it `None` when there
 is no category either — it never invents a title client-side; the prompt in
-`ollama_service.py` is where title wording is taught, so change it there rather than
+`gigachat_service.py` is where title wording is taught, so change it there rather than
 post-processing in `voice_service.py`.
 
 Split-total validation here never blocks the request — a mismatch only adds a `warnings` entry
@@ -175,8 +194,8 @@ so a bad voice draft is caught by the same, already-tested path either way.
 on both the main dashboard and a single group's analytics tab. It deliberately does **not**
 recompute anything: it calls the existing `dashboard_service` aggregates for the same scope,
 trims them down to spending totals / category shares / a monthly series, and hands only that to
-`ollama_service.generate_saving_tips` — no member names, debts, or ids are ever sent to the
-model. If Ollama is unreachable or returns something unusable, it falls back to a fixed
+`gigachat_service.generate_saving_tips` — no member names, debts, or ids are ever sent to the
+model. If GigaChat is unreachable or returns something unusable, it falls back to a fixed
 `FALLBACK_TIPS` list rather than failing the request; the dashboard must never break because the
 local model did.
 
@@ -197,11 +216,11 @@ re-derives who owes what). Every display field (`expense_title`, `payer_name`, `
 row only becomes visible once `available_at` (`created_at` + `debt_reminder_delay_seconds`,
 default 10s) passes — a plain column, not a timer, so a restart can't lose it.
 
-Afterwards, `enhance_with_qwen` runs as a `BackgroundTasks` job (its own DB session — the
+Afterwards, `enhance_with_llm` runs as a `BackgroundTasks` job (its own DB session — the
 request's is already closed) and best-effort replaces the fallback message with one worded by
-Qwen via `ollama_service.generate_debt_reminder`; failure is silently swallowed and the
-deterministic fallback stands. `source` (`"fallback"` vs `"qwen"`) records which path won but
-isn't exposed over the API.
+GigaChat via `gigachat_service.generate_debt_reminder`; failure is silently swallowed and the
+deterministic fallback stands. `source` (`"fallback"` vs `"gigachat"`) records which path won
+but isn't exposed over the API.
 
 ### Frontend (`frontend/src/`)
 
@@ -258,20 +277,28 @@ class that isn't in the config instead of erroring, so a new token has to be add
   `gigaam_service` checks the decoded WAV's duration before inference and raises
   `AudioTooLongError`, which `voice_service` turns into a 400 whose Russian message the dialog
   shows verbatim. `voice_max_upload_bytes` (15 MB) is a separate, much looser guard on size.
-- The voice pipeline, saving tips, and debt-reminder wording all need Ollama running separately
-  (`ollama serve`, with `ollama_model` pulled) — it is **not** started by `docker compose up`.
-  If Ollama is unreachable: voice drafting still succeeds but returns an empty extraction with a
-  `warnings` entry, saving tips fall back to a fixed generic list, and debt reminders keep their
-  deterministic fallback message — none of the three endpoints fails outright.
-- In Docker, `OLLAMA_BASE_URL` defaults to `http://host.docker.internal:11434` because Ollama
-  runs on the host; on the host itself the default `http://localhost:11434` is right. GigaAM
-  additionally needs `ffmpeg` on PATH.
+- The voice pipeline, saving tips, and debt-reminder wording all need `GIGACHAT_CREDENTIALS`
+  set. Without it — or with GigaChat unreachable — voice drafting still succeeds but returns an
+  empty extraction with a `warnings` entry, saving tips fall back to a fixed generic list, and
+  debt reminders keep their deterministic fallback message. None of the three endpoints fails
+  outright, which is why a missing key is a supported configuration rather than a start-up error.
+- Both GigaChat hosts serve a chain from the "Russian Trusted Root CA", which certifi and every
+  OS trust store lack. `gigachat_service` builds its SSL context from certifi **plus** the
+  bundled copy in `app/certs/russian_trusted_ca.pem` (public certificates, not a secret) — so
+  don't "fix" a TLS error by turning `gigachat_verify_ssl` off.
+- `GigaChat-3-Ultra` is served by `api.giga.chat`; the older `gigachat.devices.sberbank.ru/api`
+  host lists only GigaChat-2 and earlier. The model is never silently downgraded — a wrong
+  `gigachat_model` for the configured host comes back as a 404 "No such model", i.e. a clear
+  `GigaChatError`, not a quieter answer from a different model.
+- The completion timeout (`gigachat_timeout_seconds`, 45s) must stay below the reverse proxy's
+  `proxy_read_timeout` in `frontend/nginx.conf` (120s), or a slow voice request dies at the
+  proxy instead of returning. GigaAM additionally needs `ffmpeg` on PATH.
 - **The backend requires Python 3.12**, not merely 3.12+: torch 2.8.0 (which GigaAM's model code
   needs) publishes cp39-cp313 wheels only. Pinned in `backend/pyproject.toml`
   (`requires-python = ">=3.12,<3.13"`) and `backend/.python-version`. The unit suite still runs
   on a newer interpreter because `gigaam_service` imports torch lazily — a real transcription
   won't, and `pip install -r requirements.txt` fails outright there.
-- User-facing copy never names a model: the UI says "твой AI помощник" (see
+- User-facing copy never names a model or a provider: the UI says "твой AI помощник" (see
   `VoiceExpenseDialog.tsx`, `SavingTipsCard.tsx`, and the warning text in `voice_service.py`).
 - **`npm run typecheck` emits compiled output next to the sources.** The script overrides the
   tsconfigs' `noEmit`, so it writes `Foo.js`/`Foo.d.ts` beside every `Foo.tsx` (plus
@@ -281,6 +308,10 @@ class that isn't in the config instead of erroring, so a new token has to be add
   edited, and `vite.config.js` wins over `vite.config.ts`. If a change appears to have no effect,
   check for a `.js` sibling first. `npm run build` / `tsc -b` alone do not emit; after running
   `typecheck`, `git status` and clean up what it produced.
+- The Authorization Key must never reach a log line. `gigachat_service._safe_http_message`
+  exists for exactly this: httpx puts the full URL on its exceptions and will hand over the
+  response body, so provider errors are rendered from the exception class name and status code
+  only — asserted secret-free in `tests/test_gigachat_service.py`.
 - `services/notification_service.py` (group-invite email) and `services/debt_reminder_service.py`
   + `models/notification.py` (in-app bell) are two unrelated systems that both use the word
   "notification" — don't conflate them.

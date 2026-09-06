@@ -10,6 +10,10 @@ pwdlib[bcrypt]>=0.2.1
 PyJWT>=2.10
 python-dateutil>=2.9
 httpx>=0.28
+# Imported directly by app/services/gigachat_service.py, which builds its
+# SSL context from certifi's roots plus the Russian Trusted CA bundled in
+# app/certs (GigaChat's chain is absent from every mainstream trust store).
+certifi>=2024.8.30
 python-multipart>=0.0.20
 
 # --------------------------------------------------------------------------
