@@ -691,3 +691,97 @@ def test_generate_debt_reminder_wraps_http_failures(
 
     with pytest.raises(gigachat_service.GigaChatError):
         gigachat_service.generate_debt_reminder(_reminder_input())
+
+
+# ----------------------------------------------------------------- TLS config
+
+
+def _reset_ssl_cache() -> None:
+    """``_verify`` memoises its context process-wide; drop it between tests."""
+    gigachat_service._ssl_context = None
+
+
+def test_verify_defaults_to_a_real_ssl_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The secure default: verification stays on, with the Russian CA loaded."""
+    import ssl
+
+    monkeypatch.setattr(settings, "gigachat_verify_ssl", True)
+    _reset_ssl_cache()
+
+    verify = gigachat_service._verify()
+
+    assert isinstance(verify, ssl.SSLContext)
+    assert verify.verify_mode == ssl.CERT_REQUIRED
+    assert verify.check_hostname is True
+    _reset_ssl_cache()
+
+
+def test_verify_ssl_false_disables_certificate_checks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The documented escape hatch returns ``False``, not a lax context."""
+    monkeypatch.setattr(settings, "gigachat_verify_ssl", False)
+    _reset_ssl_cache()
+
+    assert gigachat_service._verify() is False
+    _reset_ssl_cache()
+
+
+def test_verify_ssl_false_is_scoped_to_the_gigachat_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Disabling it must not touch global/default SSL for anyone else.
+
+    Both GigaChat calls (auth and completions) pick the flag up, while
+    ``ssl.create_default_context`` — what every unrelated client builds from —
+    still verifies.
+    """
+    import ssl
+
+    monkeypatch.setattr(settings, "gigachat_verify_ssl", False)
+    _reset_ssl_cache()
+
+    seen: list[Any] = []
+
+    def _post(url: str, **kwargs: Any) -> _FakeResponse:
+        seen.append(kwargs.get("verify"))
+        if url == settings.gigachat_auth_url:
+            return _FakeResponse(_token_body())
+        return _FakeResponse(_completion('{"message": "ок"}'))
+
+    monkeypatch.setattr(gigachat_service.httpx, "post", _post)
+    gigachat_service.generate_debt_reminder(_reminder_input())
+
+    assert seen == [False, False]
+
+    # An unrelated client is unaffected: the process-wide default still verifies.
+    default = ssl.create_default_context()
+    assert default.verify_mode == ssl.CERT_REQUIRED
+    assert default.check_hostname is True
+    _reset_ssl_cache()
+
+
+def test_verify_ssl_true_passes_a_context_to_both_gigachat_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import ssl
+
+    monkeypatch.setattr(settings, "gigachat_verify_ssl", True)
+    _reset_ssl_cache()
+
+    seen: list[Any] = []
+
+    def _post(url: str, **kwargs: Any) -> _FakeResponse:
+        seen.append(kwargs.get("verify"))
+        if url == settings.gigachat_auth_url:
+            return _FakeResponse(_token_body())
+        return _FakeResponse(_completion('{"message": "ок"}'))
+
+    monkeypatch.setattr(gigachat_service.httpx, "post", _post)
+    gigachat_service.generate_debt_reminder(_reminder_input())
+
+    assert len(seen) == 2
+    assert all(isinstance(v, ssl.SSLContext) for v in seen)
+    _reset_ssl_cache()

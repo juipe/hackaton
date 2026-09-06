@@ -21,6 +21,7 @@ the wrong units and percentage.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
@@ -38,6 +39,11 @@ from app.schemas.saving_tips import (
 )
 from app.services import dashboard_service, gigachat_service
 from app.utils.money import format_money
+
+#: Every saving-tips request logs exactly one outcome line here, so which of
+#: the two fallback branches fired is never a guess. Nothing secret is logged:
+#: only the caller's user id, the requested scope, and aggregate counts.
+logger = logging.getLogger("skladchina.saving_tips")
 
 #: Used both when there isn't enough spending data to say anything personal,
 #: and as the safety net when GigaChat is unreachable or misbehaves — the
@@ -148,10 +154,21 @@ def generate(
     # Each call below re-runs the dashboard's own period/group resolution — it
     # also raises the same 400/403/404 the dashboard endpoints do for a bad
     # period or a group the caller doesn't belong to.
+    scope = (
+        f"user={user.id} period={period} date_from={date_from} "
+        f"date_to={date_to} group_id={group_id}"
+    )
     summary = dashboard_service.summary(
         db, user=user, period=period, date_from=date_from, date_to=date_to, group_id=group_id
     )
     if summary.expense_count == 0:
+        # Branch 1 of 2: nothing to say anything personal about. GigaChat is
+        # deliberately not called — this is not a provider failure.
+        logger.info(
+            "%s expense_count=0 total_spending_cents=%s -> FALLBACK_TIPS (no spending data)",
+            scope,
+            summary.total_spending_cents,
+        )
         return FALLBACK_TIPS
 
     category_breakdown = dashboard_service.spending_by_category(
@@ -162,10 +179,24 @@ def generate(
     )
 
     payload = _build_input(summary, category_breakdown, over_time)
+    logger.info(
+        "%s expense_count=%s total_spending_cents=%s categories=%s trend=%s -> calling GigaChat",
+        scope,
+        summary.expense_count,
+        summary.total_spending_cents,
+        len(payload.categories),
+        payload.trend is not None,
+    )
     try:
-        return gigachat_service.generate_saving_tips(payload)
-    except gigachat_service.GigaChatError:
+        tips = gigachat_service.generate_saving_tips(payload)
+    except gigachat_service.GigaChatError as exc:
+        # Branch 2 of 2: the provider failed or returned something unusable.
+        # ``GigaChatError`` messages are rendered secret-free upstream
+        # (see ``gigachat_service._safe_http_message``), so this is safe to log.
+        logger.warning("%s -> FALLBACK_TIPS (GigaChat failed: %s)", scope, exc)
         return FALLBACK_TIPS
+    logger.info("%s -> real AI tips (tips=%s)", scope, len(tips.tips))
+    return tips
 
 
 __all__ = ["FALLBACK_TIPS", "generate"]

@@ -9,6 +9,7 @@ and group-scoping behaviour is exercised against real data, not a mock.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -22,7 +23,7 @@ from app.models.expense import Expense, SplitMode
 from app.models.group import Group
 from app.models.user import User
 from app.schemas.saving_tips import SavingTip, SavingTipsOut
-from app.services import gigachat_service
+from app.services import gigachat_service, saving_tips_service
 from app.utils.time import add_months, start_of_month, utcnow
 
 
@@ -530,3 +531,161 @@ def test_saving_tip_output_carries_no_numeric_fields(monkeypatch: pytest.MonkeyP
     dumped = tip.model_dump()
     assert set(dumped.keys()) == {"title", "text", "type"}
     assert all(isinstance(value, str) for value in dumped.values())
+
+
+# ----------------------------------------------- the exact requests the UI makes
+#
+# Two call sites exist in the frontend, both via ``useGenerateSavingTips``:
+#   DashboardPage    -> params {period: "all"}
+#   GroupDetailPage  -> params {period: "all", group_id: <id>}
+# ``buildUrl`` in ``lib/api.ts`` drops undefined values, so these arrive as
+# ``?period=all`` and ``?period=all&group_id=...``. The tests below pin that
+# neither shape can silently take a FALLBACK_TIPS branch while GigaChat works.
+
+
+def _fallback_titles() -> set[str]:
+    return {tip.title for tip in saving_tips_service.FALLBACK_TIPS.tips}
+
+
+def test_dashboard_page_request_returns_real_tips_not_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    api_client: Callable[[User], TestClient],
+    world: World,
+) -> None:
+    """`?period=all` — the DashboardPage call site."""
+    _stub_success(monkeypatch)
+
+    response = api_client(world.alice).post(
+        "/api/dashboard/saving-tips", params={"period": "all"}
+    )
+
+    assert response.status_code == 200
+    titles = {tip["title"] for tip in response.json()["tips"]}
+    assert titles.isdisjoint(_fallback_titles())
+
+
+def test_group_detail_page_request_returns_real_tips_not_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    api_client: Callable[[User], TestClient],
+    world: World,
+) -> None:
+    """`?period=all&group_id=...` — the GroupDetailPage analytics call site."""
+    _stub_success(monkeypatch)
+
+    response = api_client(world.alice).post(
+        "/api/dashboard/saving-tips",
+        params={"period": "all", "group_id": str(world.family.id)},
+    )
+
+    assert response.status_code == 200
+    titles = {tip["title"] for tip in response.json()["tips"]}
+    assert titles.isdisjoint(_fallback_titles())
+
+
+@pytest.mark.parametrize("period", ["all", "this_month", "last_3_months"])
+def test_every_ui_period_covering_the_data_returns_real_tips(
+    period: str,
+    monkeypatch: pytest.MonkeyPatch,
+    api_client: Callable[[User], TestClient],
+    world: World,
+) -> None:
+    """No period whose window contains the spending may reach a fallback branch.
+
+    ``last_month`` is deliberately excluded: every ``world`` expense is dated
+    ``utcnow()``, so that window is genuinely empty and its fallback is correct
+    behaviour — pinned separately below.
+    """
+    _stub_success(monkeypatch)
+
+    response = api_client(world.alice).post(
+        "/api/dashboard/saving-tips", params={"period": period}
+    )
+
+    assert response.status_code == 200
+    titles = {tip["title"] for tip in response.json()["tips"]}
+    assert titles.isdisjoint(_fallback_titles())
+
+
+# ------------------------------------------------- the fallback reason is logged
+
+
+def test_llm_failure_logs_which_branch_returned_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+    api_client: Callable[[User], TestClient],
+    world: World,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def _raise(_payload: object) -> SavingTipsOut:
+        raise gigachat_service.GigaChatError("HTTP 401")
+
+    monkeypatch.setattr(gigachat_service, "generate_saving_tips", _raise)
+
+    with caplog.at_level(logging.INFO, logger="skladchina.saving_tips"):
+        response = api_client(world.alice).post("/api/dashboard/saving-tips")
+
+    assert response.status_code == 200
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("GigaChat failed" in message for message in messages)
+    assert any("calling GigaChat" in message for message in messages)
+    assert not any("no spending data" in message for message in messages)
+
+
+def test_empty_data_logs_the_other_branch(
+    monkeypatch: pytest.MonkeyPatch,
+    api_client: Callable[[User], TestClient],
+    make_user: Callable[..., User],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setattr(
+        gigachat_service,
+        "generate_saving_tips",
+        lambda _payload: (_ for _ in ()).throw(AssertionError("must not be called")),
+    )
+
+    with caplog.at_level(logging.INFO, logger="skladchina.saving_tips"):
+        response = api_client(make_user()).post("/api/dashboard/saving-tips")
+
+    assert response.status_code == 200
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("no spending data" in message for message in messages)
+    assert not any("calling GigaChat" in message for message in messages)
+
+
+def test_success_logs_real_tips_and_never_logs_the_key(
+    monkeypatch: pytest.MonkeyPatch,
+    api_client: Callable[[User], TestClient],
+    world: World,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setattr(settings, "gigachat_credentials", "c3VwZXItc2VjcmV0")
+    _stub_success(monkeypatch)
+
+    with caplog.at_level(logging.INFO, logger="skladchina.saving_tips"):
+        response = api_client(world.alice).post("/api/dashboard/saving-tips")
+
+    assert response.status_code == 200
+    blob = "\n".join(record.getMessage() for record in caplog.records)
+    assert "real AI tips" in blob
+    assert "FALLBACK_TIPS" not in blob
+    assert "c3VwZXItc2VjcmV0" not in blob
+
+
+def test_a_genuinely_empty_period_still_falls_back(
+    monkeypatch: pytest.MonkeyPatch,
+    api_client: Callable[[User], TestClient],
+    world: World,
+) -> None:
+    """Fallback protection stays intact for a window with no spending in it."""
+
+    def _spy(_payload: object) -> SavingTipsOut:
+        raise AssertionError("should not be called for an empty period")
+
+    monkeypatch.setattr(gigachat_service, "generate_saving_tips", _spy)
+
+    response = api_client(world.alice).post(
+        "/api/dashboard/saving-tips", params={"period": "last_month"}
+    )
+
+    assert response.status_code == 200
+    titles = {tip["title"] for tip in response.json()["tips"]}
+    assert titles == _fallback_titles()
