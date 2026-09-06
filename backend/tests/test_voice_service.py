@@ -1,14 +1,14 @@
 """Voice draft resolution logic.
 
-Whisper and Ollama are monkeypatched — this is not a test of the local model
+GigaAM and Ollama are monkeypatched — this is not a test of the local model
 weights, it is a test of the pure resolution logic: turning whatever the LLM
 said into a draft where payer/participants/category/split are either
 resolved against real group data and validated, or flagged for the user to
 fix in the existing confirmation UI, with no guessing anywhere.
 
 Real-model coverage (does Qwen actually produce this shape for these exact
-transcripts) is exercised separately against a live local Ollama — see the
-verification report, not this file.
+transcripts) lives in ``test_ai_smoke.py``, which runs against the live local
+models only when explicitly asked for.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from app.core.errors import BadRequest
 from app.models.group import Group
 from app.models.user import User
 from app.schemas.voice import LLMExpenseExtraction
-from app.services import ollama_service, voice_service
+from app.services import gigaam_service, ollama_service, voice_service
 
 
 @pytest.fixture()
@@ -54,7 +54,7 @@ def split_group(
     group_factory: Callable[..., Group], split_people: tuple[User, User, User]
 ) -> Group:
     anya, maksim, sasha = split_people
-    return group_factory(anya, name="Складчина", currency="RUB", members=[maksim, sasha])
+    return group_factory(anya, name="СберВместе", currency="RUB", members=[maksim, sasha])
 
 
 def _extraction(**overrides: object) -> LLMExpenseExtraction:
@@ -68,7 +68,7 @@ def _share(name: str, value: str | None = None) -> dict[str, str | None]:
 def _stub_pipeline(
     monkeypatch: pytest.MonkeyPatch, *, transcript: str, extraction: LLMExpenseExtraction
 ) -> None:
-    monkeypatch.setattr(voice_service.whisper_service, "transcribe", lambda _audio: transcript)
+    monkeypatch.setattr(voice_service.gigaam_service, "transcribe", lambda _audio: transcript)
     monkeypatch.setattr(
         voice_service.ollama_service,
         "extract_expense",
@@ -162,10 +162,10 @@ def test_unmatched_participant_name_is_unresolved(
     assert draft.participants.unresolved == ["Зина"]
 
 
-def test_category_falls_back_to_other_when_qwen_slips_up(
+def test_category_falls_back_to_other_when_the_model_slips_up(
     monkeypatch: pytest.MonkeyPatch, db: Session, group: Group, people: tuple[User, User, User]
 ) -> None:
-    """Qwen is instructed to always pick "other" when nothing fits, and to
+    """The model is instructed to always pick "other" when nothing fits, and to
     never invent a slug — but if it slips up and returns one that doesn't
     match any real category, the backend falls back to "other" itself rather
     than leaving the category unresolved (that status is reserved for a
@@ -187,7 +187,7 @@ def test_category_falls_back_to_other_when_qwen_slips_up(
 def test_category_resolves_semantically_without_exact_wording(
     monkeypatch: pytest.MonkeyPatch, db: Session, group: Group, people: tuple[User, User, User]
 ) -> None:
-    """The transcript never says "транспорт" — Qwen is expected to map the
+    """The transcript never says "транспорт" — the model is expected to map the
     meaning ("такси") to the right slug itself; the backend just validates
     that slug against the real category list."""
     anya, *_ = people
@@ -232,13 +232,49 @@ def test_empty_transcript_raises_bad_request(
         voice_service.build_draft(db, group=group, actor=anya, audio_bytes=b"fake-audio")
 
 
-def test_ollama_failure_degrades_gracefully_instead_of_erroring(
+def test_stt_failure_raises_bad_request(
     monkeypatch: pytest.MonkeyPatch, db: Session, group: Group, people: tuple[User, User, User]
 ) -> None:
-    """Ollama being unreachable must not lose the transcript or 500 the request."""
+    """A transcription failure must surface as the endpoint's 400, never as a
+    500 and never as a silently empty draft."""
+    anya, *_ = people
+
+    def _boom(_audio: bytes) -> str:
+        raise gigaam_service.GigaAMError("ffmpeg не смог декодировать запись")
+
+    monkeypatch.setattr(voice_service.gigaam_service, "transcribe", _boom)
+
+    with pytest.raises(BadRequest) as excinfo:
+        voice_service.build_draft(db, group=group, actor=anya, audio_bytes=b"fake-audio")
+
+    assert "Не удалось обработать аудиозапись" in str(excinfo.value.detail)
+
+
+def test_too_long_recording_tells_the_user_what_to_do(
+    monkeypatch: pytest.MonkeyPatch, db: Session, group: Group, people: tuple[User, User, User]
+) -> None:
+    """The one STT failure the user can fix keeps its own message instead of
+    the generic one — see ``gigaam_service.AudioTooLongError``."""
+    anya, *_ = people
+
+    def _too_long(_audio: bytes) -> str:
+        raise gigaam_service.AudioTooLongError("Запись длиннее 25 секунд — запишите покороче")
+
+    monkeypatch.setattr(voice_service.gigaam_service, "transcribe", _too_long)
+
+    with pytest.raises(BadRequest) as excinfo:
+        voice_service.build_draft(db, group=group, actor=anya, audio_bytes=b"fake-audio")
+
+    assert "25 секунд" in str(excinfo.value.detail)
+
+
+def test_llm_failure_degrades_gracefully_instead_of_erroring(
+    monkeypatch: pytest.MonkeyPatch, db: Session, group: Group, people: tuple[User, User, User]
+) -> None:
+    """The LLM being unreachable must not lose the transcript or 500 the request."""
     anya, *_ = people
     monkeypatch.setattr(
-        voice_service.whisper_service, "transcribe", lambda _audio: "Заплатил за обед"
+        voice_service.gigaam_service, "transcribe", lambda _audio: "Заплатил за обед"
     )
 
     def _boom(_transcript: str, _categories: object) -> LLMExpenseExtraction:
@@ -255,7 +291,9 @@ def test_ollama_failure_degrades_gracefully_instead_of_erroring(
     assert draft.payer.status == "resolved"
     assert draft.payer.value is not None
     assert draft.payer.value.user.id == anya.id
-    assert any("Qwen" in warning for warning in draft.warnings)
+    # The user-facing warning names no model — see the same wording in the UI.
+    assert any("AI помощник" in warning for warning in draft.warnings)
+    assert not any("Qwen" in warning or "Ollama" in warning for warning in draft.warnings)
 
 
 # -------------------------------------------------------------------- title
@@ -316,7 +354,7 @@ def test_missing_title_and_unresolved_category_leaves_title_blank(
     inventing anything; the confirmation form still asks for it by hand."""
     anya, *_ = people
     monkeypatch.setattr(
-        voice_service.whisper_service, "transcribe", lambda _audio: "Заплатил за обед"
+        voice_service.gigaam_service, "transcribe", lambda _audio: "Заплатил за обед"
     )
 
     def _boom(_transcript: str, _categories: object) -> LLMExpenseExtraction:

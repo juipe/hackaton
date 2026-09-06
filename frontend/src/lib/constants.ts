@@ -1,6 +1,6 @@
 import type { DashboardPeriod, SplitMode } from "@/types/api";
 
-export const APP_NAME = "Складчина";
+export const APP_NAME = "СберВместе";
 export const APP_TAGLINE = "Общие расходы — поровну и без споров";
 
 /** The product knows exactly one currency; re-exported so call sites have one import. */

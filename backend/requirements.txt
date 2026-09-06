@@ -10,5 +10,28 @@ pwdlib[bcrypt]>=0.2.1
 PyJWT>=2.10
 python-dateutil>=2.9
 httpx>=0.28
-faster-whisper>=1.0
 python-multipart>=0.0.20
+
+# --------------------------------------------------------------------------
+# Speech-to-text: GigaAM-v3 (ai-sage/GigaAM-v3), run in-process by
+# app/services/gigaam_service.py. This is what the model's own
+# `trust_remote_code` module (modeling_gigaam.py) imports, and nothing more.
+# torch is pinned to the version the model card recommends.
+#
+# torchcodec is deliberately absent: that model code reads audio by shelling
+# out to ffmpeg, so it never imports it. pyannote.audio, on the other hand, IS
+# required even though only `transcribe_longform` (which this app never calls)
+# uses it — transformers' `check_imports` statically scans the whole remote
+# module before loading it and refuses to import without pyannote installed.
+#
+# These wheels exist for CPython 3.12 (what the Docker image and pyproject's
+# requires-python target); newer interpreters may not have them yet.
+# The Dockerfile installs them from the PyTorch CPU index so the image does not
+# pull the multi-gigabyte CUDA build. Needs ffmpeg on PATH at runtime.
+torch==2.8.0
+torchaudio==2.8.0
+transformers==4.57.1
+pyannote.audio==4.0.0
+hydra-core>=1.3
+omegaconf>=2.3
+sentencepiece>=0.2

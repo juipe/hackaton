@@ -15,6 +15,22 @@ os.environ["DATABASE_URL"] = "sqlite+pysqlite:///:memory:"
 os.environ.setdefault("SECRET_KEY", "test-secret-key-for-pytest-only-not-real")
 os.environ.setdefault("FRONTEND_BASE_URL", "http://testserver")
 
+# Point the LLM at a port nothing can be listening on, so the suite is hermetic:
+# every test that exercises an AI code path either monkeypatches the call or
+# expects the failure path, and neither should depend on what happens to be
+# running on the developer's machine. Without this, creating an expense in any
+# test fires the real debt-reminder background call at whatever serves
+# OLLAMA_BASE_URL — which, on a machine with Ollama actually running, turns a
+# 3-minute suite into an hour of live model inference. Port 0 cannot be
+# connected to, so it fails immediately rather than waiting out the timeout.
+#
+# test_ai_smoke.py is the deliberate exception: it exists to talk to the real
+# Ollama, and it only runs when SKLADCHINA_AI_SMOKE=1 is set explicitly, so
+# that flag also turns this guard off.
+if os.environ.get("SKLADCHINA_AI_SMOKE") != "1":
+    os.environ["OLLAMA_BASE_URL"] = "http://127.0.0.1:0"
+    os.environ["OLLAMA_TIMEOUT_SECONDS"] = "5"
+
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy.orm import Session  # noqa: E402

@@ -40,7 +40,7 @@ export function SimplifyDebtsDialog({
         <DialogHeader>
           <DialogTitle>Упростить долги</DialogTitle>
           <DialogDescription>
-            Короткая дорога к тому же результату. Это рекомендация — «Складчина»
+            Короткая дорога к тому же результату. Это рекомендация — «СберВместе»
             не переводит деньги и не меняет, кто кому сколько должен.
           </DialogDescription>
         </DialogHeader>

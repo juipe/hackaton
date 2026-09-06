@@ -1,7 +1,7 @@
 """Voice-to-expense-draft orchestration.
 
 Turns a recorded voice note into an ephemeral, validated expense draft: local
-Whisper transcription -> local Qwen extraction (via Ollama) -> resolution of
+GigaAM transcription -> local Qwen extraction (via Ollama) -> resolution of
 payer, participants and category against the group's real members and
 categories, plus validation of whatever split Qwen thought it heard. This
 module never writes to the database and never creates an expense — that only
@@ -42,7 +42,7 @@ from app.schemas.voice import (
     ResolvedParticipant,
     VoiceExpenseDraftOut,
 )
-from app.services import ollama_service, whisper_service
+from app.services import gigaam_service, ollama_service
 from app.utils.money import str_to_cents
 
 #: Words a speaker uses to refer to themself instead of naming who paid.
@@ -57,7 +57,11 @@ def build_draft(
     warnings: list[str] = []
 
     try:
-        transcript = whisper_service.transcribe(audio_bytes).strip()
+        transcript = gigaam_service.transcribe(audio_bytes).strip()
+    except gigaam_service.AudioTooLongError as exc:
+        # The one transcription failure the user can actually do something
+        # about, so it says what to do instead of the generic message below.
+        raise BadRequest(str(exc)) from exc
     except Exception as exc:  # pragma: no cover - depends on audio codec support
         raise BadRequest("Не удалось обработать аудиозапись") from exc
     if not transcript:
@@ -71,7 +75,8 @@ def build_draft(
         ollama_succeeded = True
     except ollama_service.OllamaError:
         warnings.append(
-            "Не удалось получить структурированные данные от локальной модели Qwen"
+            "Твой AI помощник сейчас недоступен — распознанный текст сохранён, "
+            "заполните поля вручную"
         )
         extraction = LLMExpenseExtraction()
         ollama_succeeded = False

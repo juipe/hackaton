@@ -128,7 +128,7 @@ def test_rejects_a_group_the_caller_does_not_belong_to(
     assert response.status_code == 403
 
 
-def test_returns_qwens_tips_on_success(
+def test_returns_the_models_tips_on_success(
     monkeypatch: pytest.MonkeyPatch,
     api_client: Callable[[User], TestClient],
     world: World,
@@ -143,7 +143,7 @@ def test_returns_qwens_tips_on_success(
     assert body["tips"][0]["type"] == "data_driven"
 
 
-def test_falls_back_to_generic_tips_when_ollama_fails(
+def test_falls_back_to_generic_tips_when_the_llm_fails(
     monkeypatch: pytest.MonkeyPatch,
     api_client: Callable[[User], TestClient],
     world: World,
@@ -161,7 +161,7 @@ def test_falls_back_to_generic_tips_when_ollama_fails(
     assert all(tip["type"] == "generic" for tip in body["tips"])
 
 
-def test_falls_back_without_calling_ollama_when_there_is_no_spending(
+def test_falls_back_without_calling_the_llm_when_there_is_no_spending(
     monkeypatch: pytest.MonkeyPatch,
     api_client: Callable[[User], TestClient],
     make_user: Callable[..., User],
@@ -291,7 +291,7 @@ def test_custom_period_excludes_data_outside_the_window(
     assert all(tip["type"] == "generic" for tip in response.json()["tips"])
 
 
-def test_sends_no_ids_or_member_data_to_qwen(
+def test_sends_no_ids_or_member_data_to_the_model(
     monkeypatch: pytest.MonkeyPatch,
     api_client: Callable[[User], TestClient],
     world: World,
@@ -317,7 +317,7 @@ def test_sends_no_ids_or_member_data_to_qwen(
     # Only the documented fields exist anywhere on the payload — no member
     # names, emails, group/category ids, or debt/balance figures. Every
     # amount and percentage is already a formatted display string, never a
-    # raw cents integer or an unrounded ratio Qwen could recompute.
+    # raw cents integer or an unrounded ratio the model could recompute.
     assert set(dumped.keys()) == {
         "total_spending_display",
         "expense_count",
@@ -340,7 +340,7 @@ def test_sends_no_ids_or_member_data_to_qwen(
     assert dumped["trend"] is None
 
 
-def test_odd_cents_are_converted_to_rubles_before_reaching_qwen(
+def test_odd_cents_are_converted_to_rubles_before_reaching_the_model(
     db: Session,
     monkeypatch: pytest.MonkeyPatch,
     api_client: Callable[[User], TestClient],
@@ -350,10 +350,10 @@ def test_odd_cents_are_converted_to_rubles_before_reaching_qwen(
 ) -> None:
     """A non-round cents amount must already be a correct ruble string.
 
-    Regression for the real E2E failure where Qwen was handed a raw cents
+    Regression for the real E2E failure where the model was handed a raw cents
     integer and mis-converted it (5 RUB reported as "500 RUB", 70 RUB
-    reported as "19,000 RUB"). The backend must do this conversion, not Qwen
-    — so it must already be right in the payload Qwen receives.
+    reported as "19,000 RUB"). The backend must do this conversion, not the
+    model — so it must already be right in the payload the model receives.
     """
     alice = make_user(name="Alice")
     group = group_factory(alice, name="Solo")
@@ -407,7 +407,7 @@ def test_trend_percentage_is_calculated_by_the_backend(
 ) -> None:
     """Month-to-month change must arrive pre-computed, exactly like the
     real E2E failure this fixes: 220,00 ₽ -> 300,00 ₽ is +36,4%, not a
-    number Qwen invented or mis-derived.
+    number the model invented or mis-derived.
     """
     alice = make_user(name="Alice")
     group = group_factory(alice, name="Two Months")
@@ -518,9 +518,9 @@ def test_no_trend_when_only_one_month_has_data(
 
 
 def test_saving_tip_output_carries_no_numeric_fields(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Qwen's return value is free text only — ``title``/``text``/``type``.
+    """The model's return value is free text only — ``title``/``text``/``type``.
 
-    Even if Qwen's generated text contains a wrong number, there is no
+    Even if the model's generated text contains a wrong number, there is no
     numeric field anywhere on ``SavingTip``/``SavingTipsOut`` for that wrong
     number to land in and be reused elsewhere in the app — it can only ever
     exist inside a display string, never parsed back into a value that

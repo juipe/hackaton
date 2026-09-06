@@ -41,7 +41,7 @@ export function Wordmark({ size = "md", className }: WordmarkProps) {
           <path d="M3.5 12h8.5" strokeOpacity="0.45" />
         </svg>
       </span>
-      <span className={cn("font-bold tracking-[-0.02em]", scale.text)}>Складчина</span>
+      <span className={cn("font-bold tracking-[-0.02em]", scale.text)}>СберВместе</span>
     </Link>
   );
 }

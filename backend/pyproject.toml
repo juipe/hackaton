@@ -1,8 +1,11 @@
 [project]
 name = "skladchina-backend"
 version = "1.0.0"
-description = "API «Складчина» — учёт общих расходов"
-requires-python = ">=3.12"
+description = "API «СберВместе» — учёт общих расходов"
+# Upper bound is real, not caution: the AI pipeline pins torch 2.8.0, which
+# publishes wheels for cp39-cp313 only, and GigaAM's model code needs that torch.
+# The Docker image is python:3.12-slim, which is the version this is tested on.
+requires-python = ">=3.12,<3.13"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

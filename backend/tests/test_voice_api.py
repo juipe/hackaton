@@ -1,7 +1,7 @@
 """Voice expense draft endpoint.
 
 Exercises the route through the real HTTP/auth/CSRF/membership stack, with
-Whisper and Ollama monkeypatched so the test suite never needs a model or a
+GigaAM and Ollama monkeypatched so the test suite never needs a model or a
 running Ollama server. Asserts the one hard rule of this endpoint: it never
 creates an expense, only an ephemeral draft.
 """
@@ -38,7 +38,7 @@ def group(group_factory: Callable[..., Group], people: tuple[User, User]) -> Gro
 
 def _stub_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        voice_service.whisper_service,
+        voice_service.gigaam_service,
         "transcribe",
         lambda _audio: "Заплатил 500 рублей за обед",
     )
@@ -111,6 +111,57 @@ def test_oversized_audio_is_rejected(
 
     response = _upload(client, str(group.id), content=b"a" * 100)
     assert response.status_code == 400
+
+
+def test_too_long_recording_returns_a_message_the_user_can_act_on(
+    monkeypatch: pytest.MonkeyPatch,
+    api_client: Callable[[User], TestClient],
+    people: tuple[User, User],
+    group: Group,
+) -> None:
+    """The 25s GigaAM limit has to reach the user as readable Russian, not a
+    generic failure: the dialog renders ``ApiError.detail`` verbatim (see
+    ``errorMessage`` in frontend/src/lib/api.ts), so this response body is
+    literally what gets shown."""
+    anya, _boris = people
+
+    def _too_long(_audio: bytes) -> str:
+        raise voice_service.gigaam_service.AudioTooLongError(
+            "Запись длиннее 25 секунд — запишите покороче или добавьте расход вручную"
+        )
+
+    monkeypatch.setattr(voice_service.gigaam_service, "transcribe", _too_long)
+    client = api_client(anya)
+
+    response = _upload(client, str(group.id))
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert "25 секунд" in detail
+    # Names no model and no exception type — see the "твой AI помощник" rule.
+    assert "GigaAM" not in detail and "Error" not in detail
+
+
+def test_generic_transcription_failure_keeps_the_generic_message(
+    monkeypatch: pytest.MonkeyPatch,
+    api_client: Callable[[User], TestClient],
+    people: tuple[User, User],
+    group: Group,
+) -> None:
+    """Only the too-long case gets its own wording; everything else keeps the
+    message the endpoint has always returned."""
+    anya, _boris = people
+
+    def _boom(_audio: bytes) -> str:
+        raise voice_service.gigaam_service.GigaAMError("ffmpeg fell over")
+
+    monkeypatch.setattr(voice_service.gigaam_service, "transcribe", _boom)
+    client = api_client(anya)
+
+    response = _upload(client, str(group.id))
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Не удалось обработать аудиозапись"
 
 
 def test_returns_draft_and_never_creates_an_expense(

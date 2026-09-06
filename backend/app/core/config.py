@@ -9,7 +9,7 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    app_name: str = "Складчина"
+    app_name: str = "СберВместе"
     environment: str = "development"
 
     database_url: str = "postgresql+psycopg://skladchina:skladchina@localhost:5432/skladchina"
@@ -31,12 +31,19 @@ class Settings(BaseSettings):
 
     invite_expire_hours: int = 24 * 14
 
-    # Voice expense pipeline — Whisper and Qwen both run locally, no external
-    # AI API is ever called. See services/whisper_service.py and
-    # services/ollama_service.py.
-    whisper_model: str = "small"
-    whisper_device: str = "cpu"
-    whisper_compute_type: str = "int8"
+    # AI pipeline — GigaAM (speech-to-text) and Qwen via Ollama (structured
+    # extraction, saving tips, debt-reminder wording) both run locally, no
+    # external AI API is ever called and no API key exists. See
+    # services/gigaam_service.py and services/ollama_service.py.
+    #
+    # GigaAM runs in-process (transformers + torch); the weights are pulled
+    # from Hugging Face on first use and cached under HF_HOME.
+    gigaam_model: str = "ai-sage/GigaAM-v3"
+    gigaam_revision: str = "e2e_rnnt"
+    gigaam_device: str = "cpu"
+    gigaam_ffmpeg_binary: str = "ffmpeg"
+    # Ollama runs on the host, not in a container — inside Docker it is reached
+    # at host.docker.internal (see docker-compose.yml).
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "qwen3.5:9b"
     ollama_timeout_seconds: int = 120

@@ -13,8 +13,8 @@ function InitialState({ onGenerate }: { onGenerate: () => void }) {
         <Sparkles className="size-6" aria-hidden />
       </span>
       <p className="mx-auto max-w-[42ch] text-[15px] leading-relaxed text-muted-foreground">
-        Qwen разберёт расходы за выбранный период и предложит пару советов, как сократить
-        траты.
+        Твой AI помощник разберёт расходы за выбранный период и предложит пару советов,
+        как сократить траты.
       </p>
       <Button type="button" size="sm" onClick={onGenerate}>
         <Sparkles aria-hidden />
@@ -32,7 +32,7 @@ function LoadingState() {
       </span>
       <p className="text-[15px] font-semibold text-foreground">Анализируем расходы…</p>
       <p className="max-w-[36ch] text-[13px] text-dim">
-        Qwen работает локально — это может занять немного времени.
+        Твой AI помощник работает локально — это может занять немного времени.
       </p>
     </div>
   );
@@ -103,7 +103,7 @@ export interface SavingTipsCardProps {
  * AI-сгенерированные советы по экономии — на тех же расходах, что и остальная
  * сводка, для того же периода/группы. Ничего не запрашивается само по себе:
  * генерация всегда по клику, так что появление карточки не стоит лишнего
- * обращения к Qwen.
+ * обращения к модели.
  */
 export function SavingTipsCard({ params, className }: SavingTipsCardProps) {
   const mutation = useGenerateSavingTips(params);

@@ -64,7 +64,7 @@ export function SettleUpModal({
         <DialogHeader>
           <DialogTitle>Погасить долг</DialogTitle>
           <DialogDescription>
-            «Складчина» не переводит деньги. Запишите здесь перевод, который уже
+            «СберВместе» не переводит деньги. Запишите здесь перевод, который уже
             состоялся на самом деле, — наличными, картой, как договорились.
           </DialogDescription>
         </DialogHeader>

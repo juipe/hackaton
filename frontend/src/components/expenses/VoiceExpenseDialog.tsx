@@ -302,7 +302,7 @@ export function VoiceExpenseDialog({ open, onOpenChange, groupId }: VoiceExpense
               Распознаём речь и данные о расходе…
             </p>
             <p className="max-w-[36ch] text-[13px] text-dim">
-              Whisper и Qwen работают локально — это может занять до пары минут.
+              Твой AI помощник работает локально — это может занять до пары минут.
             </p>
           </div>
         ) : null}

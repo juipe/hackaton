@@ -46,15 +46,18 @@ services:
       DB_WAIT_INTERVAL: ${DB_WAIT_INTERVAL:-2}
       # Protocol names. The SPA hardcodes the same values in src/lib/api.ts, so
       # change both sides together or leave them at the defaults.
-      APP_NAME: ${APP_NAME:-Складчина}
+      APP_NAME: ${APP_NAME:-СберВместе}
       COOKIE_NAME: ${COOKIE_NAME:-skladchina_session}
       CSRF_COOKIE_NAME: ${CSRF_COOKIE_NAME:-skladchina_csrf}
       CSRF_HEADER_NAME: ${CSRF_HEADER_NAME:-X-CSRF-Token}
-      # Voice expense pipeline — both AI components run locally, no external API.
-      # host.docker.internal reaches Ollama running on the host machine.
-      WHISPER_MODEL: ${WHISPER_MODEL:-small}
-      WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
-      WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
+      # AI pipeline — both components run locally, no external API, no API key.
+      # Speech-to-text (GigaAM-v3) runs inside this container; the weights are
+      # downloaded on the first voice request and cached in the volume below.
+      GIGAAM_MODEL: ${GIGAAM_MODEL:-ai-sage/GigaAM-v3}
+      GIGAAM_REVISION: ${GIGAAM_REVISION:-e2e_rnnt}
+      GIGAAM_DEVICE: ${GIGAAM_DEVICE:-cpu}
+      # The LLM (Qwen) runs in Ollama on the host, not in a container —
+      # host.docker.internal is how this container reaches it.
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5:9b}
       OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-120}
@@ -62,6 +65,8 @@ services:
       # Lets host.docker.internal resolve on Linux too (macOS/Windows have it
       # built in); harmless no-op there.
       - "host.docker.internal:host-gateway"
+    volumes:
+      - skladchina_hf_cache:/home/skladchina/.cache/huggingface
     ports:
       # Exposed for the OpenAPI docs at http://localhost:8000/api/docs.
       - "${BACKEND_PORT:-8000}:8000"
@@ -77,3 +82,5 @@ services:
 
 volumes:
   skladchina_pgdata:
+  # GigaAM weights, downloaded once on the first voice request.
+  skladchina_hf_cache:
