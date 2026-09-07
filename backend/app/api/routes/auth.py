@@ -7,7 +7,7 @@ from fastapi import APIRouter, Response, status
 from app.core.cookies import clear_auth_cookies, set_auth_cookies
 from app.core.deps import CurrentUser, DbSession
 from app.schemas.auth import ChangePasswordIn, LoginIn, RegisterIn, UpdateMeIn
-from app.schemas.user import UserPublic
+from app.schemas.user import UserPrivate
 from app.services import auth_service
 
 router = APIRouter(prefix="/auth", tags=["Вход и профиль"])
@@ -18,19 +18,19 @@ router = APIRouter(prefix="/auth", tags=["Вход и профиль"])
     status_code=status.HTTP_201_CREATED,
     summary="Зарегистрироваться",
 )
-def register(payload: RegisterIn, response: Response, db: DbSession) -> UserPublic:
+def register(payload: RegisterIn, response: Response, db: DbSession) -> UserPrivate:
     user = auth_service.register(
         db, name=payload.name, email=payload.email, password=payload.password
     )
     set_auth_cookies(response, user.id)
-    return UserPublic.model_validate(user)
+    return UserPrivate.model_validate(user)
 
 
 @router.post("/login", summary="Войти")
-def login(payload: LoginIn, response: Response, db: DbSession) -> UserPublic:
+def login(payload: LoginIn, response: Response, db: DbSession) -> UserPrivate:
     user = auth_service.authenticate(db, email=payload.email, password=payload.password)
     set_auth_cookies(response, user.id)
-    return UserPublic.model_validate(user)
+    return UserPrivate.model_validate(user)
 
 
 @router.post(
@@ -45,16 +45,21 @@ def logout(response: Response) -> None:
 
 
 @router.get("/me", summary="Мой профиль")
-def read_me(user: CurrentUser) -> UserPublic:
-    return UserPublic.model_validate(user)
+def read_me(user: CurrentUser) -> UserPrivate:
+    return UserPrivate.model_validate(user)
 
 
 @router.patch("/me", summary="Изменить профиль")
-def update_me(payload: UpdateMeIn, user: CurrentUser, db: DbSession) -> UserPublic:
+def update_me(payload: UpdateMeIn, user: CurrentUser, db: DbSession) -> UserPrivate:
+    kwargs: dict = {}
+    # Для бюджета явный null — команда «снять лимит», поэтому поле передаётся
+    # дальше только когда клиент его действительно прислал.
+    if "monthly_budget_cents" in payload.model_fields_set:
+        kwargs["monthly_budget_cents"] = payload.monthly_budget_cents
     updated = auth_service.update_profile(
-        db, user=user, name=payload.name, email=payload.email
+        db, user=user, name=payload.name, email=payload.email, **kwargs
     )
-    return UserPublic.model_validate(updated)
+    return UserPrivate.model_validate(updated)
 
 
 @router.post(

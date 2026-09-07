@@ -65,8 +65,33 @@ class SavingTip(BaseModel):
     type: TipType
 
 
+class PotentialSavingsItem(BaseModel):
+    """Одна «необязательная» категория в блоке «можно сэкономить»."""
+
+    slug: str
+    name: str
+    icon: str
+    amount_cents: int
+
+
+class PotentialSavings(BaseModel):
+    """Сумма личных трат по необязательным категориям за выбранный период.
+
+    Считается в Python из долей пользователя
+    (:func:`app.services.dashboard_service.user_share_by_category`) — модель к
+    этим числам не прикасается, поэтому поле дополняет ответ и при fallback.
+    """
+
+    total_cents: int
+    currency: str
+    items: list[PotentialSavingsItem]
+
+
 class SavingTipsOut(BaseModel):
     tips: list[SavingTip]
+    #: Заполняется сервисом после ответа модели (или поверх fallback) — LLM
+    #: это поле не возвращает, поэтому оно опционально и без него ответ валиден.
+    potential_savings: PotentialSavings | None = None
 
     @field_validator("tips")
     @classmethod
@@ -77,6 +102,8 @@ class SavingTipsOut(BaseModel):
 
 
 __all__ = [
+    "PotentialSavings",
+    "PotentialSavingsItem",
     "SavingTip",
     "SavingTipsCategoryInput",
     "SavingTipsInput",

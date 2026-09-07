@@ -31,6 +31,8 @@ from sqlalchemy.orm import Session
 from app.models.user import User
 from app.schemas.dashboard import CategoryBreakdownOut, DashboardSummaryOut, SpendingOverTimeOut
 from app.schemas.saving_tips import (
+    PotentialSavings,
+    PotentialSavingsItem,
     SavingTip,
     SavingTipsCategoryInput,
     SavingTipsInput,
@@ -70,6 +72,11 @@ FALLBACK_TIPS = SavingTipsOut(
         ),
     ]
 )
+
+#: «Необязательные» категории для блока «можно сэкономить»: кафе и рестораны,
+#: развлечения, подписки и покупки. Жильё/аренда/ЖКХ/продукты/здоровье/транспорт
+#: сэкономить «просто отказавшись» нельзя, поэтому их тут нет.
+DISCRETIONARY_SLUGS = frozenset({"food", "entertainment", "subscriptions", "shopping"})
 
 _PERCENT_ONE_DP = Decimal("0.1")
 
@@ -142,6 +149,44 @@ def _build_input(
     )
 
 
+def _build_potential_savings(
+    db: Session,
+    *,
+    user: User,
+    period: str,
+    date_from: date | None,
+    date_to: date | None,
+    group_id: uuid.UUID | None,
+    currency: str,
+) -> PotentialSavings | None:
+    """Личные траты по необязательным категориям — или ``None``, если их нет.
+
+    Считается целиком в Python из долей пользователя, поэтому блок живёт и при
+    fallback-советах: провайдер к этим числам отношения не имеет.
+    """
+    items = dashboard_service.user_share_by_category(
+        db, user=user, period=period, date_from=date_from, date_to=date_to, group_id=group_id
+    )
+    discretionary = [
+        item for item in items if item.slug in DISCRETIONARY_SLUGS and item.amount_cents > 0
+    ]
+    if not discretionary:
+        return None
+    return PotentialSavings(
+        total_cents=sum(item.amount_cents for item in discretionary),
+        currency=currency,
+        items=[
+            PotentialSavingsItem(
+                slug=item.slug,
+                name=item.name,
+                icon=item.icon,
+                amount_cents=item.amount_cents,
+            )
+            for item in discretionary
+        ],
+    )
+
+
 def generate(
     db: Session,
     *,
@@ -177,6 +222,17 @@ def generate(
     over_time = dashboard_service.spending_over_time(
         db, user=user, period=period, date_from=date_from, date_to=date_to, group_id=group_id
     )
+    # Считается локально, до похода в GigaChat: блок «можно сэкономить» должен
+    # появляться и тогда, когда советы пришлось заменить на fallback.
+    potential_savings = _build_potential_savings(
+        db,
+        user=user,
+        period=period,
+        date_from=date_from,
+        date_to=date_to,
+        group_id=group_id,
+        currency=summary.currency,
+    )
 
     payload = _build_input(summary, category_breakdown, over_time)
     logger.info(
@@ -194,9 +250,15 @@ def generate(
         # ``GigaChatError`` messages are rendered secret-free upstream
         # (see ``gigachat_service._safe_http_message``), so this is safe to log.
         logger.warning("%s -> FALLBACK_TIPS (GigaChat failed: %s)", scope, exc)
-        return FALLBACK_TIPS
-    logger.info("%s -> real AI tips (tips=%s)", scope, len(tips.tips))
-    return tips
+        # model_copy, не мутация: FALLBACK_TIPS — общий модульный синглтон.
+        return FALLBACK_TIPS.model_copy(update={"potential_savings": potential_savings})
+    logger.info(
+        "%s -> real AI tips (tips=%s, potential_savings=%s)",
+        scope,
+        len(tips.tips),
+        potential_savings.total_cents if potential_savings else None,
+    )
+    return tips.model_copy(update={"potential_savings": potential_savings})
 
 
-__all__ = ["FALLBACK_TIPS", "generate"]
+__all__ = ["DISCRETIONARY_SLUGS", "FALLBACK_TIPS", "generate"]

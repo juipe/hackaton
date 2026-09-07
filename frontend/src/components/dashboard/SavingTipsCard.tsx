@@ -1,10 +1,11 @@
-import { Lightbulb, Loader2, RotateCw, Sparkles } from "lucide-react";
+import { Lightbulb, Loader2, PiggyBank, RotateCw, Sparkles } from "lucide-react";
 
 import { ErrorState } from "@/components/common/ErrorState";
 import { SectionCard } from "@/components/common/SectionCard";
 import { Button } from "@/components/ui/button";
 import { useGenerateSavingTips } from "@/hooks/useDashboard";
-import type { DashboardParams, SavingTip } from "@/types/api";
+import { formatMoneyRounded } from "@/lib/money";
+import type { DashboardParams, PotentialSavings, SavingTip } from "@/types/api";
 
 function InitialState({ onGenerate }: { onGenerate: () => void }) {
   return (
@@ -56,17 +57,49 @@ function TipRow({ tip }: { tip: SavingTip }) {
   );
 }
 
+/**
+ * «Можно сэкономить до X» — сумма личных трат по необязательным категориям.
+ * Числа считает бэкенд, не модель, поэтому блок показывается и с fallback-советами.
+ */
+function PotentialSavingsBlock({ savings }: { savings: PotentialSavings }) {
+  const breakdown = savings.items
+    .map((item) => `${item.name} ${formatMoneyRounded(item.amount_cents)}`)
+    .join(" + ");
+  return (
+    <div className="rounded-row bg-subtle p-4">
+      <div className="flex items-center gap-3">
+        <span className="flex size-[38px] shrink-0 items-center justify-center rounded-chip bg-accent text-accent-foreground">
+          <PiggyBank className="size-[18px]" aria-hidden />
+        </span>
+        <div className="min-w-0">
+          <p className="text-[15px] font-semibold text-foreground">
+            Можно сэкономить до {formatMoneyRounded(savings.total_cents)}
+          </p>
+          <p className="mt-[2px] text-[13px] leading-[1.4] text-dim [overflow-wrap:anywhere]">
+            Ваши траты на необязательное: {breakdown}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TipsList({
   tips,
+  savings,
   onRegenerate,
   isRegenerating,
 }: {
   tips: SavingTip[];
+  savings?: PotentialSavings | null;
   onRegenerate: () => void;
   isRegenerating: boolean;
 }) {
   return (
     <div className="flex flex-col gap-2">
+      {savings && savings.total_cents > 0 ? (
+        <PotentialSavingsBlock savings={savings} />
+      ) : null}
       <ul className="flex flex-col gap-1">
         {tips.map((tip, index) => (
           // Tips have no id of their own — the LLM output is ephemeral and never
@@ -122,6 +155,7 @@ export function SavingTipsCard({ params, className }: SavingTipsCardProps) {
       ) : mutation.data ? (
         <TipsList
           tips={mutation.data.tips}
+          savings={mutation.data.potential_savings}
           onRegenerate={() => mutation.mutate()}
           isRegenerating={mutation.isPending}
         />

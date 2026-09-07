@@ -36,10 +36,24 @@ def authenticate(db: Session, *, email: str, password: str) -> User:
     return user
 
 
+#: Distinguishes "field absent from the request" from an explicit ``None``:
+#: for the budget the latter clears the limit rather than leaving it alone.
+_UNSET = object()
+
+
 def update_profile(
-    db: Session, *, user: User, name: str | None = None, email: str | None = None
+    db: Session,
+    *,
+    user: User,
+    name: str | None = None,
+    email: str | None = None,
+    monthly_budget_cents: int | None | object = _UNSET,
 ) -> User:
-    """Apply the supplied profile fields. ``None`` means "leave as it is"."""
+    """Apply the supplied profile fields. ``None`` means "leave as it is".
+
+    Exception: ``monthly_budget_cents`` uses the ``_UNSET`` sentinel, because
+    an explicit ``None`` is a real instruction — "снять лимит".
+    """
     if name is not None:
         user.name = name
     if email is not None and email != user.email:
@@ -47,6 +61,8 @@ def update_profile(
         if owner is not None and owner.id != user.id:
             raise Conflict(_EMAIL_TAKEN)
         user.email = email
+    if monthly_budget_cents is not _UNSET:
+        user.monthly_budget_cents = monthly_budget_cents  # type: ignore[assignment]
     _commit_unique_email(db)
     return user
 

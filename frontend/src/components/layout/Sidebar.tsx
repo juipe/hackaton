@@ -1,10 +1,11 @@
-import { Mic, Plus } from "lucide-react";
+import { Mic, Plus, ReceiptText } from "lucide-react";
 import { NavLink } from "react-router-dom";
 
 import { useAddExpense } from "@/components/layout/AddExpenseContext";
 import { NAV_ITEMS } from "@/components/layout/NavItems";
 import { NotificationBell } from "@/components/layout/NotificationBell";
 import { UserMenu } from "@/components/layout/UserMenu";
+import { useReceiptExpenseDialog } from "@/components/layout/ReceiptExpenseDialogContext";
 import { useVoiceExpenseDialog } from "@/components/layout/VoiceExpenseDialogContext";
 import { Wordmark } from "@/components/layout/Wordmark";
 import { Button } from "@/components/ui/button";
@@ -105,6 +106,7 @@ function GroupLinks() {
 export function Sidebar() {
   const { openAddExpense } = useAddExpense();
   const { openVoiceExpense } = useVoiceExpenseDialog();
+  const { openReceiptExpense } = useReceiptExpenseDialog();
 
   return (
     <aside className="fixed inset-y-0 left-0 z-40 hidden w-[272px] flex-col gap-7 overflow-y-auto bg-app px-5 py-7 lg:flex">
@@ -112,31 +114,44 @@ export function Sidebar() {
         <Wordmark />
       </div>
 
-      <div className="flex items-center gap-1.5">
-        {/*
-          The row is exactly as wide as the sidebar (272px minus its padding),
-          which is too narrow for the full-padding button and an icon button
-          side by side — min-w-0 lets it shrink instead of forcing the row
-          wider, and the label truncates as the last resort so it never does.
-        */}
+      {/*
+        Иерархия действий в два яруса: основная кнопка занимает всю ширину и
+        не борется за место с иконками, а два AI-входа — равные второстепенные
+        кнопки с подписями под ней. В 272px три кнопки в один ряд не влезали:
+        «Добавить расход» обрезался троеточием.
+      */}
+      <div className="flex flex-col gap-1.5">
         <Button
           size="lg"
-          className="min-w-0 flex-1 gap-2.5 px-2 font-bold [&_svg]:size-[19px]"
+          className="w-full gap-2.5 font-bold [&_svg]:size-[19px]"
           onClick={() => openAddExpense()}
         >
           <Plus aria-hidden />
-          <span className="truncate">Добавить расход</span>
+          Добавить расход
         </Button>
-        <Button
-          variant="outline"
-          size="icon"
-          className="size-10 shrink-0"
-          aria-label="Добавить расход голосом"
-          title="Добавить расход голосом"
-          onClick={() => openVoiceExpense()}
-        >
-          <Mic aria-hidden />
-        </Button>
+        <div className="flex gap-1.5">
+          {/* 116px на кнопку: компактные паддинги и 13px, иначе подписи режутся. */}
+          <Button
+            variant="outline"
+            className="min-w-0 flex-1 gap-1.5 px-2 text-[13px] [&_svg]:size-4"
+            aria-label="Добавить расход голосом"
+            title="Добавить расход голосом"
+            onClick={() => openVoiceExpense()}
+          >
+            <Mic aria-hidden />
+            <span className="truncate">Голосом</span>
+          </Button>
+          <Button
+            variant="outline"
+            className="min-w-0 flex-1 gap-1.5 px-2 text-[13px] [&_svg]:size-4"
+            aria-label="Добавить расход по фото чека"
+            title="Добавить расход по фото чека"
+            onClick={() => openReceiptExpense()}
+          >
+            <ReceiptText aria-hidden />
+            <span className="truncate">По чеку</span>
+          </Button>
+        </div>
       </div>
 
       <nav aria-label="Основная навигация" className="flex flex-col gap-1.5">

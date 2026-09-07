@@ -10,6 +10,7 @@ from fastapi import APIRouter, Query
 
 from app.core.deps import CurrentUser, DbSession
 from app.schemas.dashboard import (
+    BudgetStatusOut,
     CategoryBreakdownOut,
     DashboardSummaryOut,
     SpendingOverTimeOut,
@@ -98,6 +99,13 @@ def get_spending_over_time(
         date_to=date_to,
         group_id=group_id,
     )
+
+
+@router.get("/budget-status", summary="Критическая точка бюджета")
+def get_budget_status(db: DbSession, user: CurrentUser) -> BudgetStatusOut:
+    """Всегда текущий календарный месяц и все группы — период не принимается:
+    лимит месячный по своей природе."""
+    return dashboard_service.budget_status(db, user=user)
 
 
 @router.post("/saving-tips", summary="Советы по экономии на основе расходов")

@@ -20,6 +20,7 @@ from app.models.expense import SplitMode
 from app.schemas.category import CategoryOut
 from app.schemas.common import ORMModel
 from app.schemas.user import UserPublic
+from app.utils.money import NBSP
 
 
 def decimal_to_str(value: Decimal | None) -> str | None:
@@ -44,7 +45,16 @@ def _to_decimal(raw: Any) -> Decimal | None:
         # str() first: Decimal(0.1) would carry the binary representation error.
         return Decimal(str(raw))
     if isinstance(raw, str):
-        cleaned = raw.strip()
+        # The same tolerance as utils.money.str_to_cents: users (and older
+        # clients) send Russian-formatted numbers — "1 234,56", "100,5 ₽" —
+        # and a bare Decimal() call rejects every one of them.
+        cleaned = (
+            raw.strip()
+            .replace("₽", "")
+            .replace(NBSP, "")
+            .replace(" ", "")
+            .replace(",", ".")
+        )
         if not cleaned:
             return None
         try:

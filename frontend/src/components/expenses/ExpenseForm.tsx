@@ -28,12 +28,45 @@ import { useCategories } from "@/hooks/useCategories";
 import { useCreateExpense, useUpdateExpense } from "@/hooks/useExpenses";
 import { useAuth } from "@/hooks/useAuth";
 import { useGroup, useMembers } from "@/hooks/useGroups";
-import { errorMessage } from "@/lib/api";
+import { api, errorMessage } from "@/lib/api";
 import { SPLIT_MODES } from "@/lib/constants";
 import { dateInputToIso, todayInputValue, toDateInputValue } from "@/lib/format";
-import { centsToInput, currencySymbol, parseAmountToCents } from "@/lib/money";
+import { centsToInput, currencySymbol, formatMoney, parseAmountToCents } from "@/lib/money";
 import { cn } from "@/lib/utils";
-import type { Expense, ExpenseCreateInput, SplitMode, VoiceExpenseDraft } from "@/types/api";
+import type {
+  BudgetStatus,
+  Expense,
+  ExpenseCreateInput,
+  SplitMode,
+  VoiceExpenseDraft,
+} from "@/types/api";
+
+/**
+ * Проверка «критической точки бюджета» после сохранения нового расхода.
+ * Ошибки глотаются: предупреждение — приятная добавка, а не часть сохранения.
+ */
+async function warnIfBudgetCritical() {
+  try {
+    const status = await api.get<BudgetStatus>("/dashboard/budget-status");
+    if (status.level === "critical") {
+      const over =
+        status.remaining_cents !== null && status.remaining_cents < 0
+          ? ` Превышение: ${formatMoney(-status.remaining_cents, status.currency)}.`
+          : "";
+      toast.error(
+        `Вы превысили критическую точку бюджета: потрачено ${formatMoney(status.spent_cents, status.currency)} из ${formatMoney(status.monthly_budget_cents ?? 0, status.currency)}.${over}`,
+        { duration: 8000 },
+      );
+    } else if (status.level === "warning") {
+      toast.warning(
+        `Вы приблизились к критической точке бюджета: потрачено ${formatMoney(status.spent_cents, status.currency)} из ${formatMoney(status.monthly_budget_cents ?? 0, status.currency)}.`,
+        { duration: 8000 },
+      );
+    }
+  } catch {
+    // Нет статуса — нет предупреждения; расход уже сохранён.
+  }
+}
 
 export interface ExpenseFormProps {
   groupId: string;
@@ -136,10 +169,19 @@ export function ExpenseForm({
       const resolvedParticipantIds = voiceDraft.participants.resolved.map(
         (participant) => participant.member.user.id,
       );
+      // Черновик, который никого не назвал (обычный чек, «заплатил за такси»),
+      // при равном делении означает «на всех» — как и ручной ввод. Названные,
+      // но неоднозначные имена — другое дело: их пользователь выбирает сам.
+      const nobodyNamed =
+        resolvedParticipantIds.length === 0 &&
+        voiceDraft.participants.ambiguous.length === 0 &&
+        voiceDraft.participants.unresolved.length === 0;
       const participantIds =
-        payerId && !resolvedParticipantIds.includes(payerId)
-          ? [...resolvedParticipantIds, payerId]
-          : resolvedParticipantIds;
+        nobodyNamed && voiceDraft.split_mode === "equal"
+          ? members.map((member) => member.user.id)
+          : payerId && !resolvedParticipantIds.includes(payerId)
+            ? [...resolvedParticipantIds, payerId]
+            : resolvedParticipantIds;
       // The row inputs are edited as human-typed decimals with a comma, same
       // as `rowsFromExpense` below — the API (and this draft) use a dot.
       const rows: Record<string, string> =
@@ -208,6 +250,9 @@ export function ExpenseForm({
 
   const formError = (() => {
     if (!draft) return null;
+    if (draft.amountText.trim() && parseAmountToCents(draft.amountText) === null) {
+      return "Не получилось разобрать сумму — проверьте разделитель (например: 4570,50)";
+    }
     if (amountCents <= 0) return "Сумма должна быть больше нуля";
     if (!draft.title.trim()) return "Укажите название";
     if (!draft.categoryId) return "Выберите категорию";
@@ -313,6 +358,8 @@ export function ExpenseForm({
       } else {
         await createExpense.mutateAsync(input);
         toast.success(`Расход «${input.title}» добавлен`);
+        // Не ждём: форма закрывается сразу, предупреждение догонит тостом.
+        void warnIfBudgetCritical();
       }
       onDone?.();
     } catch (error) {

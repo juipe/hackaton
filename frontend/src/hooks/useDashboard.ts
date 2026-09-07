@@ -2,6 +2,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 
 import { api } from "@/lib/api";
 import type {
+  BudgetStatus,
   CategoryBreakdown,
   DashboardParams,
   DashboardSummary,
@@ -47,6 +48,18 @@ export function useSpendingOverTime(params: DashboardParams = {}) {
     queryFn: () =>
       api.get<SpendingOverTime>("/dashboard/spending-over-time", toQuery(params)),
     enabled: isReady(params),
+  });
+}
+
+/**
+ * «Критическая точка бюджета»: траты текущего месяца против лимита из профиля.
+ * Без параметров — период всегда текущий месяц, охват — все группы; ключ
+ * входит в ["dashboard"], так что каждая мутация расхода обновляет и его.
+ */
+export function useBudgetStatus() {
+  return useQuery({
+    queryKey: ["dashboard", "budget-status"],
+    queryFn: () => api.get<BudgetStatus>("/dashboard/budget-status"),
   });
 }
 

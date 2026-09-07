@@ -1,11 +1,12 @@
 """Structured extraction and text generation via the GigaChat API.
 
 The only module in the app that talks to an LLM provider. It exposes exactly
-three operations — :func:`extract_expense`, :func:`generate_saving_tips` and
-:func:`generate_debt_reminder` — and one error type, :class:`GigaChatError`.
-Everything above this layer (``voice_service``, ``saving_tips_service``,
-``debt_reminder_service``) only knows those four names, so swapping the
-provider again never reaches business logic.
+four operations — :func:`extract_expense`, :func:`extract_expense_from_receipt`,
+:func:`generate_saving_tips` and :func:`generate_debt_reminder` — and one error
+type, :class:`GigaChatError`. Everything above this layer (``voice_service``,
+``receipt_service``, ``saving_tips_service``, ``debt_reminder_service``) only
+knows those five names, so swapping the provider again never reaches business
+logic.
 
 Wire protocol
 -------------
@@ -18,11 +19,16 @@ Two hosts are involved, because GigaChat splits auth from inference:
   serve one.
 - **inference** — ``POST {gigachat_base_url}/v1/chat/completions``, the
   OpenAI-compatible surface, with ``Authorization: Bearer <access token>``.
+- **files** — the receipt path additionally does a multipart
+  ``POST {gigachat_base_url}/v1/files`` (upload, id then referenced via the
+  user message's ``attachments``) and a best-effort
+  ``POST {gigachat_base_url}/v1/files/{id}/delete`` afterwards.
 
 Tokens are cached process-wide until shortly before ``expires_at`` (see
 :class:`_TokenCache`), so a completion normally costs one HTTP round trip, not
 two. A 401 from the completions endpoint invalidates the cache and is retried
-exactly once — that is the only retry here.
+exactly once; the file upload applies the same single-401-retry rule — those
+two are the only retries here.
 
 TLS
 ---
@@ -191,6 +197,55 @@ markdown, со следующими полями:
 {{"title": "Продукты", "description": null, "amount": "2000", "occurred_at": null,
 "category_slug": "groceries", "payer_name": "я", "split_mode": "equal",
 "participants": []}}
+"""
+
+
+_RECEIPT_PROMPT_TEMPLATE = """\
+Ты извлекаешь структурированные данные о расходе из ФОТОГРАФИИ КАССОВОГО ЧЕКА
+для приложения совместных расходов. Изображение чека приложено к сообщению.
+Верни ТОЛЬКО JSON-объект без пояснений и без markdown, со следующими полями:
+
+{{
+  "title": короткое название расхода строкой (1-3 слова) или null,
+  "description": краткое перечисление основных позиций чека (до 5 позиций,
+    через запятую) или null, если позиции не читаются,
+  "amount": ИТОГОВАЯ сумма чека в рублях строкой, например "1200" или "1200.50", или null,
+  "occurred_at": дата на чеке в формате YYYY-MM-DD, если читается, иначе null,
+  "category_slug": slug категории расхода — см. правила ниже,
+  "payer_name": всегда "я" — чек загружает тот, кто платил,
+  "split_mode": всегда "equal" — чек ничего не говорит о делении,
+  "participants": всегда пустой массив []
+}}
+
+## Сумма
+
+"amount" — это строка «ИТОГО» / «ИТОГ» / «К ОПЛАТЕ» чека, то есть конечная
+сумма со всеми скидками, а НЕ цена первой позиции и НЕ сумма без скидки.
+Если итоговая сумма не читается, верни null — никогда не складывай позиции
+сам и никогда не угадывай.
+
+## Название (title)
+
+Короткое естественное название по смыслу покупки: «Продукты», «Обед», «Аптека».
+Если на чеке видно название магазина, добавь его: «Продукты в Пятёрочке».
+Возвращай null только если по чеку совсем непонятно, что куплено.
+
+## Категория
+
+Доступные категории расхода (используй ТОЛЬКО "slug" из этого списка для поля
+"category_slug"):
+{categories}
+
+Выбирай категорию по смыслу купленного: продуктовый магазин — "groceries",
+кафе или ресторан — "food", аптека — "health", такси или заправка —
+"transport" и так далее. Если ничего явно не подходит, выбери "other".
+Никогда не придумывай свой slug и не оставляй поле пустым.
+
+## Общие правила
+
+Никогда не выдумывай числа и даты, которых нет на чеке. Если поле не
+читается — верни null. Никогда не возвращай идентификаторы — только текст,
+числа и slug категории из списка выше.
 """
 
 
@@ -469,13 +524,21 @@ def _post_completion(
     user_content: str,
     schema: dict[str, Any] | None,
     token: str,
+    attachments: list[str] | None = None,
 ) -> str:
-    """One ``/v1/chat/completions`` call; returns the assistant's raw content."""
+    """One ``/v1/chat/completions`` call; returns the assistant's raw content.
+
+    ``attachments`` — ids from ``/v1/files`` (see :func:`_upload_file`); GigaChat
+    reads the referenced images alongside the user message.
+    """
+    user_message: dict[str, Any] = {"role": "user", "content": user_content}
+    if attachments:
+        user_message["attachments"] = attachments
     body: dict[str, Any] = {
         "model": settings.gigachat_model,
         "messages": [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content},
+            user_message,
         ],
         "stream": False,
         # The task is extraction and re-phrasing of given facts, never
@@ -514,7 +577,11 @@ def _post_completion(
 
 
 def _complete_json(
-    *, system_prompt: str, user_content: str, schema: dict[str, Any] | None
+    *,
+    system_prompt: str,
+    user_content: str,
+    schema: dict[str, Any] | None,
+    attachments: list[str] | None = None,
 ) -> Any:
     """Call the model and parse its answer as JSON.
 
@@ -530,6 +597,7 @@ def _complete_json(
                 user_content=user_content,
                 schema=schema,
                 token=token,
+                attachments=attachments,
             )
         except httpx.HTTPStatusError as exc:
             if exc.response is not None and exc.response.status_code == 401:
@@ -539,6 +607,7 @@ def _complete_json(
                     user_content=user_content,
                     schema=schema,
                     token=_token_cache.get(force_refresh=True),
+                    attachments=attachments,
                 )
             else:
                 raise
@@ -546,11 +615,86 @@ def _complete_json(
         raise GigaChatError(f"GigaChat вернул ошибку: {_safe_http_message(exc)}") from exc
     except httpx.HTTPError as exc:
         raise GigaChatError(f"GigaChat недоступен: {_safe_http_message(exc)}") from exc
+    except json.JSONDecodeError as exc:
+        # A 2xx whose body is not JSON (gateway/WAF page, empty body): the
+        # json.JSONDecodeError from response.json() is a ValueError, not an
+        # httpx error, so it needs its own clause to stay a GigaChatError.
+        raise GigaChatError("GigaChat вернул не-JSON ответ") from exc
 
     try:
         return json.loads(_strip_code_fence(raw))
     except json.JSONDecodeError as exc:
         raise GigaChatError("GigaChat вернул не-JSON ответ") from exc
+
+
+def _post_file(*, data: bytes, filename: str, content_type: str, token: str) -> str:
+    """One ``/v1/files`` upload; returns the stored file's id."""
+    url = f"{settings.gigachat_base_url.rstrip('/')}/v1/files"
+    response = httpx.post(
+        url,
+        files={"file": (filename, data, content_type)},
+        data={"purpose": "general"},
+        headers={"Authorization": f"Bearer {token}"},
+        verify=_verify(),
+        timeout=settings.gigachat_timeout_seconds,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    file_id = payload.get("id")
+    if not isinstance(file_id, str) or not file_id:
+        raise GigaChatError("Ответ GigaChat не содержит id загруженного файла")
+    return file_id
+
+
+def _upload_file(*, data: bytes, filename: str, content_type: str) -> str:
+    """Upload ``data`` to GigaChat's file store, with the same 401-retry rule
+    as :func:`_complete_json`."""
+    token = _token_cache.get()
+    try:
+        try:
+            return _post_file(
+                data=data, filename=filename, content_type=content_type, token=token
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response is not None and exc.response.status_code == 401:
+                _token_cache.invalidate()
+                return _post_file(
+                    data=data,
+                    filename=filename,
+                    content_type=content_type,
+                    token=_token_cache.get(force_refresh=True),
+                )
+            raise
+    except httpx.HTTPStatusError as exc:
+        raise GigaChatError(f"GigaChat вернул ошибку: {_safe_http_message(exc)}") from exc
+    except httpx.HTTPError as exc:
+        raise GigaChatError(f"GigaChat недоступен: {_safe_http_message(exc)}") from exc
+    except json.JSONDecodeError as exc:
+        # Same non-JSON-2xx case as in _complete_json: without this clause the
+        # error would escape un-wrapped and 500 the receipt request instead of
+        # letting receipt_service degrade to an empty draft.
+        raise GigaChatError("GigaChat вернул не-JSON ответ") from exc
+
+
+def _delete_file_best_effort(file_id: str) -> None:
+    """Remove an uploaded receipt from GigaChat's file store after extraction.
+
+    Purely a data-hygiene courtesy: the photo has served its purpose the moment
+    the completion returns, and nothing should keep accumulating in a
+    third-party store. Best-effort by design — a failed delete must never
+    break, delay or fail the extraction that already succeeded, hence the
+    blanket ``except`` and no retry.
+    """
+    try:
+        url = f"{settings.gigachat_base_url.rstrip('/')}/v1/files/{file_id}/delete"
+        httpx.post(
+            url,
+            headers={"Authorization": f"Bearer {_token_cache.get()}"},
+            verify=_verify(),
+            timeout=settings.gigachat_auth_timeout_seconds,
+        )
+    except Exception:  # noqa: BLE001 - see docstring
+        pass
 
 
 def _strip_code_fence(raw: str) -> str:
@@ -729,6 +873,36 @@ def extract_expense(transcript: str, categories: Sequence[Category]) -> LLMExpen
     return _validate(LLMExpenseExtraction, _stringify_numbers(parsed))
 
 
+def extract_expense_from_receipt(
+    image_bytes: bytes,
+    *,
+    filename: str,
+    content_type: str,
+    categories: Sequence[Category],
+) -> LLMExpenseExtraction:
+    """Structured expense fields read off a receipt photo.
+
+    Same output contract as :func:`extract_expense` — the receipt image is
+    first uploaded to GigaChat's file store, then referenced as an attachment
+    of the extraction request, so the model reads the picture itself; nothing
+    is OCR'd locally. Raises :class:`GigaChatError` on any failure, which
+    ``receipt_service`` turns into an empty draft plus a warning.
+    """
+    file_id = _upload_file(data=image_bytes, filename=filename, content_type=content_type)
+    system_prompt = _RECEIPT_PROMPT_TEMPLATE.format(categories=_format_categories(categories))
+    try:
+        parsed = _complete_json(
+            system_prompt=system_prompt,
+            user_content="Извлеки данные о расходе из приложенного чека. Верни только JSON.",
+            schema=_EXTRACTION_SCHEMA,
+            attachments=[file_id],
+        )
+    finally:
+        # Чек прочитан (или не прочитан) — в чужом хранилище ему делать нечего.
+        _delete_file_best_effort(file_id)
+    return _validate(LLMExpenseExtraction, _stringify_numbers(parsed))
+
+
 def generate_saving_tips(data: SavingTipsInput) -> SavingTipsOut:
     """2-3 saving tips from the trimmed spending data in ``data``.
 
@@ -769,6 +943,7 @@ def generate_debt_reminder(data: DebtReminderInput) -> DebtReminderOut:
 __all__ = [
     "GigaChatError",
     "extract_expense",
+    "extract_expense_from_receipt",
     "generate_debt_reminder",
     "generate_saving_tips",
 ]

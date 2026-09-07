@@ -61,7 +61,27 @@ class SpendingOverTimeOut(BaseModel):
     items: list[SpendingOverTimePoint]
 
 
+class BudgetStatusOut(BaseModel):
+    """«Критическая точка бюджета»: траты текущего месяца против лимита.
+
+    ``spent_cents`` — личная доля пользователя (сумма его долей в расходах всех
+    его групп) за текущий календарный месяц, не полные суммы чужих расходов.
+    """
+
+    #: None — лимит не задан; уровень тогда всегда ``none``.
+    monthly_budget_cents: int | None
+    spent_cents: int
+    #: budget - spent; отрицательное значение — размер превышения.
+    remaining_cents: int | None
+    #: Доля лимита, уже потраченная, в процентах (0 при незаданном лимите).
+    usage_percent: float
+    #: none — лимит не задан; ok < 85% ≤ warning < 100% ≤ critical.
+    level: str
+    currency: str
+
+
 __all__ = [
+    "BudgetStatusOut",
     "CategoryBreakdownItem",
     "CategoryBreakdownOut",
     "DashboardGroupSummary",

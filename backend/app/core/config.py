@@ -70,6 +70,8 @@ class Settings(BaseSettings):
     gigachat_verify_ssl: bool = True
 
     voice_max_upload_bytes: int = 15 * 1024 * 1024
+    #: Фото чека: телефонный снимок в 10 МБ помещается с запасом.
+    receipt_max_upload_bytes: int = 10 * 1024 * 1024
 
     # Debt-reminder notifications — see services/debt_reminder_service.py. The
     # delay is a plain column value (``available_at``), not a scheduled job, so

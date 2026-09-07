@@ -66,6 +66,10 @@ export default {
         },
         positive: "hsl(var(--positive))",
         negative: "hsl(var(--negative))",
+        warning: {
+          DEFAULT: "hsl(var(--warning))",
+          strong: "hsl(var(--warning-strong))",
+        },
         "negative-surface": {
           DEFAULT: "hsl(var(--negative-surface))",
           hover: "hsl(var(--negative-surface-hover))",

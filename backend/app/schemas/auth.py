@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from pydantic import (
+    AfterValidator,
     BaseModel,
     BeforeValidator,
     EmailStr,
@@ -107,11 +108,45 @@ class LoginIn(_EmailBody):
     password: SecretField = Field(description=PASSWORD_DESCRIPTION)
 
 
+def _reject_bool_budget(value: object) -> object:
+    if isinstance(value, bool):
+        raise ValueError("Бюджет должен быть числом")
+    return value
+
+
+def _check_budget_positive(value: int) -> int:
+    """After-валидатор: срабатывает ПОСЛЕ приведения к int, поэтому ловит и
+    строку "-100", и float -100.0 — before-проверка по isinstance(int) их
+    пропускала бы."""
+    if value <= 0:
+        raise ValueError("Бюджет должен быть больше нуля")
+    return value
+
+
+#: Положительная сумма в копейках; None очищает лимит. Верхняя граница держит
+#: значение в пределах BigInteger с запасом (миллиард рублей хватит всем).
+BudgetField = Annotated[
+    int,
+    BeforeValidator(_reject_bool_budget),
+    AfterValidator(_check_budget_positive),
+    Field(le=100_000_000_000),
+]
+
+
 class UpdateMeIn(_EmailBody):
-    """Частичное изменение профиля. Пропущенное поле остаётся как было."""
+    """Частичное изменение профиля. Пропущенное поле остаётся как было.
+
+    ``monthly_budget_cents`` — исключение: явный ``null`` очищает лимит, поэтому
+    сервис различает «поле не прислали» и «прислали null» через
+    ``model_fields_set`` (тот же приём, что в ``ExpenseUpdate``).
+    """
 
     name: NameField | None = Field(default=None, description=NAME_DESCRIPTION)
     email: EmailStr | None = Field(default=None, description=EMAIL_DESCRIPTION)
+    monthly_budget_cents: BudgetField | None = Field(
+        default=None,
+        description="Критическая точка бюджета в копейках; null снимает лимит",
+    )
 
 
 class ChangePasswordIn(BaseModel):

@@ -1,5 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, Check, KeyRound, Loader2, LogOut } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/useAuth";
 import { api, errorMessage } from "@/lib/api";
+import { centsToInput, parseAmountToCents } from "@/lib/money";
 import type { UserPublic } from "@/types/api";
 
 const profileSchema = z.object({
@@ -28,6 +29,12 @@ const profileSchema = z.object({
     .string()
     .min(1, "Введите адрес электронной почты")
     .email("Похоже, это не адрес электронной почты"),
+  budget: z
+    .string()
+    .refine(
+      (value) => value.trim() === "" || (parseAmountToCents(value) ?? 0) > 0,
+      "Сумма должна быть положительным числом, например 40 000",
+    ),
 });
 
 type ProfileValues = z.infer<typeof profileSchema>;
@@ -50,13 +57,18 @@ type PasswordValues = z.infer<typeof passwordSchema>;
 
 export default function ProfilePage() {
   const { user, logout, refresh } = useAuth();
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [showPasswords, setShowPasswords] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
 
   const profileForm = useForm<ProfileValues>({
     resolver: zodResolver(profileSchema),
-    defaultValues: { name: user?.name ?? "", email: user?.email ?? "" },
+    defaultValues: {
+      name: user?.name ?? "",
+      email: user?.email ?? "",
+      budget: centsToInput(user?.monthly_budget_cents ?? null),
+    },
   });
   const passwordForm = useForm<PasswordValues>({
     resolver: zodResolver(passwordSchema),
@@ -66,19 +78,26 @@ export default function ProfilePage() {
   const { reset: resetProfileForm } = profileForm;
   const profileName = user?.name;
   const profileEmail = user?.email;
+  const profileBudget = user?.monthly_budget_cents ?? null;
 
   // The server is the authority on the saved values, so re-seed the form from the
   // refreshed session rather than from what was typed.
   useEffect(() => {
     if (profileName === undefined || profileEmail === undefined) return;
-    resetProfileForm({ name: profileName, email: profileEmail });
-  }, [profileName, profileEmail, resetProfileForm]);
+    resetProfileForm({
+      name: profileName,
+      email: profileEmail,
+      budget: centsToInput(profileBudget),
+    });
+  }, [profileName, profileEmail, profileBudget, resetProfileForm]);
 
   const updateProfile = useMutation({
     mutationFn: (values: ProfileValues) =>
       api.patch<UserPublic>("/auth/me", {
         name: values.name,
         email: values.email.trim().toLowerCase(),
+        monthly_budget_cents:
+          values.budget.trim() === "" ? null : parseAmountToCents(values.budget),
       }),
   });
 
@@ -94,6 +113,8 @@ export default function ProfilePage() {
     try {
       await updateProfile.mutateAsync(values);
       await refresh();
+      // Изменение лимита сразу отражается на карточке бюджета на главной.
+      await queryClient.invalidateQueries({ queryKey: ["dashboard", "budget-status"] });
       toast.success("Профиль обновлён");
     } catch (error) {
       const message = errorMessage(error);
@@ -200,6 +221,31 @@ export default function ProfilePage() {
               )}
             </div>
 
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="profile-budget">Критическая точка бюджета, ₽ в месяц</Label>
+              <Input
+                id="profile-budget"
+                type="text"
+                inputMode="decimal"
+                placeholder="Например, 40 000"
+                aria-invalid={profileErrors.budget ? true : undefined}
+                aria-describedby={
+                  profileErrors.budget ? "profile-budget-error" : "profile-budget-hint"
+                }
+                {...profileForm.register("budget")}
+              />
+              {profileErrors.budget ? (
+                <p id="profile-budget-error" className="text-[13px] text-destructive">
+                  {profileErrors.budget.message}
+                </p>
+              ) : (
+                <p id="profile-budget-hint" className="text-[13px] leading-relaxed text-dim">
+                  Свободная сумма на месяц. Когда ваши траты приблизятся к ней,
+                  предупредим. Оставьте поле пустым, чтобы отключить.
+                </p>
+              )}
+            </div>
+
             <div className="flex flex-wrap items-center gap-2">
               <Button
                 type="submit"
@@ -217,7 +263,13 @@ export default function ProfilePage() {
                 <Button
                   type="button"
                   variant="ghost"
-                  onClick={() => resetProfileForm({ name: user.name, email: user.email })}
+                  onClick={() =>
+                    resetProfileForm({
+                      name: user.name,
+                      email: user.email,
+                      budget: centsToInput(user.monthly_budget_cents ?? null),
+                    })
+                  }
                 >
                   Отменить
                 </Button>

@@ -37,6 +37,8 @@ export interface UserPublic {
   id: Uuid;
   name: string;
   email: string;
+  /** «Критическая точка бюджета» в копейках; null — лимит не задан. */
+  monthly_budget_cents?: number | null;
 }
 
 export interface Category {
@@ -265,8 +267,35 @@ export interface SavingTip {
   type: SavingTipType;
 }
 
+export interface PotentialSavingsItem {
+  slug: string;
+  name: string;
+  icon: string;
+  amount_cents: number;
+}
+
+/** Личные траты по «необязательным» категориям — блок «можно сэкономить». */
+export interface PotentialSavings {
+  total_cents: number;
+  currency: string;
+  items: PotentialSavingsItem[];
+}
+
 export interface SavingTipsResponse {
   tips: SavingTip[];
+  potential_savings?: PotentialSavings | null;
+}
+
+export type BudgetLevel = "none" | "ok" | "warning" | "critical";
+
+/** Траты текущего месяца против «критической точки бюджета». */
+export interface BudgetStatus {
+  monthly_budget_cents: number | null;
+  spent_cents: number;
+  remaining_cents: number | null;
+  usage_percent: number;
+  level: BudgetLevel;
+  currency: string;
 }
 
 export interface Notification {
@@ -299,6 +328,8 @@ export interface LoginInput {
 export interface UpdateMeInput {
   name?: string;
   email?: string;
+  /** null снимает лимит; поле не прислано — лимит не меняется. */
+  monthly_budget_cents?: number | null;
 }
 
 export interface ChangePasswordInput {

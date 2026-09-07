@@ -67,7 +67,6 @@ def build_draft(
     if not transcript:
         raise BadRequest("Не удалось распознать речь в записи")
 
-    members = group_repo.list_members(db, group.id)
     categories = category_repo.list_all(db)
 
     try:
@@ -80,6 +79,38 @@ def build_draft(
         )
         extraction = LLMExpenseExtraction()
         llm_succeeded = False
+
+    return draft_from_extraction(
+        db,
+        group=group,
+        actor=actor,
+        extraction=extraction,
+        llm_succeeded=llm_succeeded,
+        transcript=transcript,
+        categories=categories,
+        warnings=warnings,
+    )
+
+
+def draft_from_extraction(
+    db: Session,
+    *,
+    group: Group,
+    actor: User,
+    extraction: LLMExpenseExtraction,
+    llm_succeeded: bool,
+    transcript: str,
+    categories: list[Category],
+    warnings: list[str],
+) -> VoiceExpenseDraftOut:
+    """Resolution half of the pipeline, shared by voice notes and receipts.
+
+    Everything after the modality-specific extraction — matching payer,
+    participants and category against the group's real data, validating the
+    split, deriving the title — is the same whichever way the
+    :class:`LLMExpenseExtraction` was obtained.
+    """
+    members = group_repo.list_members(db, group.id)
 
     split_mode = _resolve_split_mode(extraction.split_mode)
     participants = _resolve_participants(extraction.participants, members, actor)
@@ -374,4 +405,4 @@ def _validate_shares(resolved: list[ResolvedParticipant], warnings: list[str]) -
         warnings.append("Сумма долей участников должна быть больше нуля — проверьте деление ниже")
 
 
-__all__ = ["build_draft"]
+__all__ = ["build_draft", "draft_from_extraction"]

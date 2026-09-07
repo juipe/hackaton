@@ -75,6 +75,10 @@ export function VoiceExpenseDialog({ open, onOpenChange, groupId }: VoiceExpense
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<number | null>(null);
+  // Компонент живёт дольше открытия диалога (Radix размонтирует только
+  // контент), поэтому ответ на загрузку, стартовавшую до закрытия, не должен
+  // воскрешать диалог задним числом: reset() двигает счётчик, хвост умирает.
+  const requestSeq = useRef(0);
 
   const activeGroupId = groupId ?? pickedGroupId;
   const showGroupPicker = !activeGroupId;
@@ -84,6 +88,7 @@ export function VoiceExpenseDialog({ open, onOpenChange, groupId }: VoiceExpense
   const supported = isRecordingSupported();
 
   const reset = () => {
+    requestSeq.current += 1;
     if (timerRef.current !== null) {
       window.clearInterval(timerRef.current);
       timerRef.current = null;
@@ -111,12 +116,15 @@ export function VoiceExpenseDialog({ open, onOpenChange, groupId }: VoiceExpense
   useEffect(() => () => reset(), []);
 
   async function handleUpload(blob: Blob) {
+    const seq = ++requestSeq.current;
     setStage("processing");
     try {
       const result = await createDraft.mutateAsync(blob);
+      if (seq !== requestSeq.current) return;
       setDraft(result);
       setStage("review");
     } catch (error) {
+      if (seq !== requestSeq.current) return;
       setErrorText(errorMessage(error));
       setStage("error");
     }

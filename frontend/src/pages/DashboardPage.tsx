@@ -7,6 +7,7 @@ import { ActivityFeed } from "@/components/common/ActivityFeed";
 import { ErrorState } from "@/components/common/ErrorState";
 import { PageHeader } from "@/components/common/PageHeader";
 import { SectionCard } from "@/components/common/SectionCard";
+import { BudgetStatusCard } from "@/components/dashboard/BudgetStatusCard";
 import { FirstRunCard } from "@/components/dashboard/FirstRunCard";
 import { GroupsOverview } from "@/components/dashboard/GroupsOverview";
 import { PeriodFilter } from "@/components/dashboard/PeriodFilter";
@@ -94,6 +95,8 @@ export default function DashboardPage() {
           isMonthlyLoading={timeQuery.isLoading}
           isMonthlyError={timeQuery.isError}
         />
+
+        <BudgetStatusCard />
 
         <div className="flex items-baseline justify-between gap-4 px-1 pt-2">
           <h2 className="text-[20px] font-bold tracking-[-0.02em]">Ваши группы</h2>

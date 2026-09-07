@@ -27,6 +27,7 @@ import { SectionCard } from "@/components/common/SectionCard";
 import { SavingTipsCard } from "@/components/dashboard/SavingTipsCard";
 import { AddExpenseDialog } from "@/components/expenses/AddExpenseDialog";
 import { ExpenseList } from "@/components/expenses/ExpenseList";
+import { ReceiptExpenseDialog } from "@/components/expenses/ReceiptExpenseDialog";
 import { VoiceExpenseDialog } from "@/components/expenses/VoiceExpenseDialog";
 import {
   groupBalanceExplainer,
@@ -131,6 +132,7 @@ export default function GroupDetailPage() {
 
   const [addOpen, setAddOpen] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
+  const [receiptOpen, setReceiptOpen] = useState(false);
   const [settleOpen, setSettleOpen] = useState(false);
   const [simplifyOpen, setSimplifyOpen] = useState(false);
   const [settlePrefill, setSettlePrefill] = useState<SettlePrefill | undefined>(undefined);
@@ -244,6 +246,7 @@ export default function GroupDetailPage() {
         group={group}
         onAddExpense={() => setAddOpen(true)}
         onVoiceExpense={() => setVoiceOpen(true)}
+        onReceiptExpense={() => setReceiptOpen(true)}
       />
 
       {balancesQuery.isError && !balances ? (
@@ -566,6 +569,11 @@ export default function GroupDetailPage() {
 
       <AddExpenseDialog open={addOpen} onOpenChange={setAddOpen} groupId={group.id} />
       <VoiceExpenseDialog open={voiceOpen} onOpenChange={setVoiceOpen} groupId={group.id} />
+      <ReceiptExpenseDialog
+        open={receiptOpen}
+        onOpenChange={setReceiptOpen}
+        groupId={group.id}
+      />
       <SettleUpModal
         open={settleOpen}
         onOpenChange={setSettleOpen}

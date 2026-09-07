@@ -37,7 +37,9 @@ def create_voice_expense_draft(
     membership: Membership,
     audio: UploadFile = File(..., description="Аудиозапись голосового ввода"),
 ) -> VoiceExpenseDraftOut:
-    raw = audio.file.read()
+    # Читаем не больше лимита плюс один байт — как в receipt.py: превышение
+    # видно по лишнему байту, а гигантский аплоад не оседает в памяти целиком.
+    raw = audio.file.read(settings.voice_max_upload_bytes + 1)
     if not raw:
         raise BadRequest("Пустая аудиозапись")
     if len(raw) > settings.voice_max_upload_bytes:

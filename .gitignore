@@ -37,6 +37,15 @@ yarn-error.log*
 pnpm-debug.log*
 .eslintcache
 
+# `npm run typecheck` emits compiled .js/.d.ts next to the sources; a stale
+# emitted Foo.js silently shadows Foo.tsx in Vite's module resolution, so the
+# emissions must never be committed.
+frontend/src/**/*.js
+frontend/src/**/*.d.ts
+!frontend/src/vite-env.d.ts
+frontend/vite.config.js
+frontend/vite.config.d.ts
+
 # ---------------------------------------------------------------------------
 # Environment
 # ---------------------------------------------------------------------------

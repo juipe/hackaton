@@ -16,6 +16,7 @@ from app.api.routes import (
     members,
     notifications,
     payments,
+    receipt,
     voice,
 )
 
@@ -28,6 +29,7 @@ api_router.include_router(invites.router)
 api_router.include_router(categories.router)
 api_router.include_router(expenses.router)
 api_router.include_router(voice.router)
+api_router.include_router(receipt.router)
 api_router.include_router(balances.router)
 api_router.include_router(payments.router)
 api_router.include_router(dashboard.router)

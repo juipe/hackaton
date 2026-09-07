@@ -47,7 +47,7 @@ def test_register_returns_public_user_and_sets_both_cookies(client: TestClient) 
 
     assert response.status_code == 201
     body = response.json()
-    assert set(body) == {"id", "name", "email"}
+    assert set(body) == {"id", "name", "email", "monthly_budget_cents"}
     assert body["name"] == "Ada Lovelace"
     assert body["email"] == "ada@example.com"
 
@@ -144,6 +144,7 @@ def test_me_returns_the_signed_in_user(
         "id": str(user.id),
         "name": "Bea Rivers",
         "email": "bea@example.com",
+        "monthly_budget_cents": None,
     }
 
 

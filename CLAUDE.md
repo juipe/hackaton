@@ -20,8 +20,10 @@ docker compose down -v             # stop and wipe the DB volume
 
 The seed creates five demo users (`olya@`, `sasha@`, `kostya@`, `maksim@`, `zhora@`
 `skladchina.ru`), all with password `Demo1234!` — `sasha@` is in all three demo groups and is
-the account to log in as when checking a change by hand. `docs/` referenced in the README does
-not exist in this repo; ignore those links.
+the account to log in as when checking a change by hand. `docs/` holds only
+`presentation-qa.md` (the team's defense cheat sheet); the contract files the README links
+there (`contract.md`, `design-contract.md`, `ru-contract.md`, …) still don't exist — ignore
+those links.
 
 ### Backend (`backend/`)
 
@@ -151,12 +153,15 @@ Speech-to-text runs on your own machine; the LLM is a remote API:
   30-minute access token, and inference goes to `gigachat_base_url` + `/v1/chat/completions`
   (the OpenAI-compatible surface) with that token as a bearer. `_TokenCache` keeps the token
   process-wide behind a lock and refreshes it a minute before expiry, so a completion is
-  normally one round trip; a 401 invalidates it and retries exactly once. All three LLM use
-  cases (`extract_expense`, `generate_saving_tips`, `generate_debt_reminder`) go through it,
-  ask for `response_format: {"type": "json_schema", ..., "strict": true}`, and raise one error
-  type, `GigaChatError`.
+  normally one round trip; a 401 invalidates it and retries exactly once. All four LLM use
+  cases (`extract_expense`, `extract_expense_from_receipt`, `generate_saving_tips`,
+  `generate_debt_reminder`) go through it, ask for
+  `response_format: {"type": "json_schema", ..., "strict": true}`, and raise one error
+  type, `GigaChatError`. The receipt path additionally uploads the photo to GigaChat's file
+  store (`/v1/files`, multipart, same 401-retry rule in `_upload_file`) and references the
+  returned id via the user message's `attachments` — vision, no local OCR.
 
-Nothing waits on GigaChat: each of the three callers degrades on `GigaChatError` (see the
+Nothing waits on GigaChat: each caller degrades on `GigaChatError` (see the
 fallbacks below), so an empty `GIGACHAT_CREDENTIALS` is a supported configuration, not a
 crash. Config lives in `core/config.py` under `gigaam_*` / `gigachat_*`.
 
@@ -187,6 +192,35 @@ on the draft. The real safety net is the same one manual entry already has: `Exp
 `split_engine` on submit) refuses to save an exact/percentage/shares split that doesn't add up,
 so a bad voice draft is caught by the same, already-tested path either way.
 
+#### Receipt-to-expense pipeline (`services/receipt_service.py`)
+
+`POST /groups/{group_id}/receipt-expenses` (`api/routes/receipt.py`) is the picture-shaped
+sibling of the voice endpoint: a JPEG/PNG photo of a cash receipt (≤ `receipt_max_upload_bytes`,
+10 MB) goes to `gigachat_service.extract_expense_from_receipt` (file upload + vision
+completion, same `LLMExpenseExtraction` contract), and the result is resolved by the exact
+same shared code voice notes use — `voice_service.draft_from_extraction` (the resolution half
+of `build_draft`, factored out for reuse). The receipt prompt pins `amount` to the receipt's
+ИТОГО line (never the first item, never a self-computed sum), `payer_name` to "я" (whoever
+uploads paid), `split_mode` to `equal` and `participants` to `[]` — a receipt says nothing
+about who owes whom, so the confirmation form defaults to an equal split across all members
+(that "nobody named → everyone" seeding rule lives in `ExpenseForm.tsx` and applies to voice
+drafts too). The frontend side is `ReceiptExpenseDialog.tsx` (+ `useReceiptExpense.ts`),
+mirroring the voice dialog's group-picker/processing/review stages.
+
+#### Budget critical point (`monthly_budget_cents`, `GET /dashboard/budget-status`)
+
+`users.monthly_budget_cents` (nullable BigInteger, migration `0003_user_budget`) is the user's
+"критическая точка бюджета" — a monthly free-spend limit. It is **private**: it appears only
+in `UserPrivate` (the `/auth/*` responses), never in `UserPublic` (payer/creator/member
+embeds), so groupmates cannot see it. `PATCH /auth/me` distinguishes "field absent" from an
+explicit `null` (which clears the limit) via `model_fields_set`. `GET /dashboard/budget-status`
+(`dashboard_service.budget_status`) compares the caller's **personal share**
+(`_share_of_user`) for the current UTC month across all groups against the limit: `ok` below
+85%, `warning` from 85%, `critical` at 100%+ (`BUDGET_WARNING_RATIO`). The frontend shows a
+progress card on the dashboard (`BudgetStatusCard.tsx`, hidden while the limit is unset) and
+fires a toast right after creating an expense (`warnIfBudgetCritical` in `ExpenseForm.tsx` —
+create only, never edit; failures are swallowed).
+
 #### AI saving tips (`services/saving_tips_service.py`)
 
 `POST /dashboard/saving-tips` (`api/routes/dashboard.py`, params: `period`/`date_from`/
@@ -198,6 +232,14 @@ trims them down to spending totals / category shares / a monthly series, and han
 model. If GigaChat is unreachable or returns something unusable, it falls back to a fixed
 `FALLBACK_TIPS` list rather than failing the request; the dashboard must never break because the
 local model did.
+
+The response also carries `potential_savings` — "можно сэкономить до X": the caller's
+**personal shares** (not group totals; `dashboard_service.user_share_by_category`) summed over
+the discretionary category slugs (`DISCRETIONARY_SLUGS`: food, entertainment, subscriptions,
+shopping). It is computed in Python before the LLM call and attached via `model_copy` on both
+the success and the fallback paths (never mutate `FALLBACK_TIPS` — it is a module-level
+singleton); the field is optional-with-default, so the LLM output contract
+(`_SAVING_TIPS_SCHEMA`) is unchanged.
 
 #### Debt-reminder notifications (`services/debt_reminder_service.py`, `models/notification.py`)
 
@@ -211,16 +253,18 @@ One `Notification` row per debtor is created synchronously, in the same transact
 expense, by `debt_reminder_service.create_reminders_for_expense` — called from
 `expense_service.create_expense` with the `SplitResult`s it already computed (this module never
 re-derives who owes what). Every display field (`expense_title`, `payer_name`, `group_name`,
-`amount_due_cents`) is a snapshot at commit time, not a live join, and a deterministic fallback
-`message` is filled in immediately so the row is complete even if nothing else ever runs. The
+`amount_due_cents`) is a snapshot at commit time, not a live join, and a complete fallback
+`message` is filled in immediately so the row is usable even if nothing else ever runs — the
+wording is a random pick from `_FALLBACK_TEMPLATES` (four variants, each always naming the
+payer, amount, expense title and group, which the notification tests assert as substrings). The
 row only becomes visible once `available_at` (`created_at` + `debt_reminder_delay_seconds`,
 default 10s) passes — a plain column, not a timer, so a restart can't lose it.
 
 Afterwards, `enhance_with_llm` runs as a `BackgroundTasks` job (its own DB session — the
 request's is already closed) and best-effort replaces the fallback message with one worded by
-GigaChat via `gigachat_service.generate_debt_reminder`; failure is silently swallowed and the
-deterministic fallback stands. `source` (`"fallback"` vs `"gigachat"`) records which path won
-but isn't exposed over the API.
+GigaChat via `gigachat_service.generate_debt_reminder`; a `GigaChatError` is logged as a
+warning (so a dead key is diagnosable) and the fallback stands. `source` (`"fallback"` vs
+`"gigachat"`) records which path won but isn't exposed over the API.
 
 ### Frontend (`frontend/src/`)
 
@@ -277,11 +321,13 @@ class that isn't in the config instead of erroring, so a new token has to be add
   `gigaam_service` checks the decoded WAV's duration before inference and raises
   `AudioTooLongError`, which `voice_service` turns into a 400 whose Russian message the dialog
   shows verbatim. `voice_max_upload_bytes` (15 MB) is a separate, much looser guard on size.
-- The voice pipeline, saving tips, and debt-reminder wording all need `GIGACHAT_CREDENTIALS`
-  set. Without it — or with GigaChat unreachable — voice drafting still succeeds but returns an
-  empty extraction with a `warnings` entry, saving tips fall back to a fixed generic list, and
-  debt reminders keep their deterministic fallback message. None of the three endpoints fails
-  outright, which is why a missing key is a supported configuration rather than a start-up error.
+- The voice pipeline, receipt drafting, saving tips, and debt-reminder wording all need
+  `GIGACHAT_CREDENTIALS` set. Without it — or with GigaChat unreachable — voice drafting still
+  succeeds but returns an empty extraction with a `warnings` entry, receipt drafting does the
+  same, saving tips fall back to a fixed generic list (the `potential_savings` block survives —
+  it's computed locally), and debt reminders keep their randomized template fallback. None of
+  the four endpoints fails outright, which is why a missing key is a supported configuration
+  rather than a start-up error.
 - Both GigaChat hosts serve a chain from the "Russian Trusted Root CA", which certifi and every
   OS trust store lack. `gigachat_service` builds its SSL context from certifi **plus** the
   bundled copy in `app/certs/russian_trusted_ca.pem` (public certificates, not a secret) — so

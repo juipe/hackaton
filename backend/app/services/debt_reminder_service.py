@@ -7,8 +7,9 @@ divides money and never re-derives who owes what; it only reads
 Two separate concerns, run at two different times:
 
 - :func:`create_reminders_for_expense` runs synchronously, inside the same
-  transaction as the expense, with a deterministic fallback message already
-  filled in. This is what makes the reminder restart-safe: the row (and its
+  transaction as the expense, with a complete fallback message already filled
+  in (worded by a random pick from a small template set — the facts in it are
+  always the same). This is what makes the reminder restart-safe: the row (and its
   text) exist in the database before the request ever returns, so a crash
   before the background step below ever runs loses nothing but a nicer
   sentence. The 10-second delay is a plain ``available_at`` column, not a
@@ -24,6 +25,7 @@ Two separate concerns, run at two different times:
 from __future__ import annotations
 
 import logging
+import random
 import uuid
 from collections.abc import Sequence
 from datetime import timedelta
@@ -47,12 +49,27 @@ FALLBACK_SOURCE = "fallback"
 LLM_SOURCE = "gigachat"
 
 
+#: Every template must mention the payer, the amount, the expense title and the
+#: group — the same facts the LLM prompt demands — so a random pick stays a
+#: complete notification (and keeps the substring assertions in
+#: tests/test_notifications_api.py green whichever variant wins).
+_FALLBACK_TEMPLATES = (
+    "Вы должны {payer} {amount} за «{expense}» в группе «{group}».",
+    "Напоминаем: за вами {amount} для {payer} — расход «{expense}» в группе «{group}».",
+    "Не забудьте вернуть {payer} {amount} за «{expense}» в группе «{group}».",
+    "{payer} ждёт от вас {amount} за «{expense}» — группа «{group}».",
+)
+
+
 def _fallback_message(
     *, payer_name: str, amount_due_cents: int, currency: str, expense_title: str, group_name: str
 ) -> str:
-    return (
-        f"Вы должны {payer_name} {format_money(amount_due_cents, currency)} "
-        f"за «{expense_title}» в группе «{group_name}»."
+    template = random.choice(_FALLBACK_TEMPLATES)
+    return template.format(
+        payer=payer_name,
+        amount=format_money(amount_due_cents, currency),
+        expense=expense_title,
+        group=group_name,
     )
 
 
@@ -145,7 +162,14 @@ def enhance_with_llm(notification_ids: Sequence[uuid.UUID]) -> None:
                 notification.message = result.message
                 notification.source = LLM_SOURCE
                 db.commit()
-            except gigachat_service.GigaChatError:
+            except gigachat_service.GigaChatError as exc:
+                # The fallback text stands either way, but the reason must be
+                # visible in logs — a dead key looks identical to "no AI" otherwise.
+                logger.warning(
+                    "Debt reminder %s keeps fallback wording (GigaChat failed: %s)",
+                    notification_id,
+                    exc,
+                )
                 db.rollback()
             except Exception:  # a background job must never crash the process
                 logger.exception("Failed to word debt reminder %s via GigaChat", notification_id)

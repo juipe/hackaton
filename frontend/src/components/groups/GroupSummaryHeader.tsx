@@ -1,4 +1,13 @@
-import { CalendarDays, Coins, Mic, Plus, Settings, UserPlus, Users } from "lucide-react";
+import {
+  CalendarDays,
+  Coins,
+  Mic,
+  Plus,
+  ReceiptText,
+  Settings,
+  UserPlus,
+  Users,
+} from "lucide-react";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 
@@ -13,6 +22,8 @@ export interface GroupSummaryHeaderProps {
   onAddExpense?: () => void;
   /** Открывает диалог голосового ввода. Без него кнопка действия не рисуется. */
   onVoiceExpense?: () => void;
+  /** Открывает диалог загрузки чека. Без него кнопка действия не рисуется. */
+  onReceiptExpense?: () => void;
 }
 
 /** Мета-чип шапки: иконка и короткий факт о группе. */
@@ -28,6 +39,7 @@ export function GroupSummaryHeader({
   group,
   onAddExpense,
   onVoiceExpense,
+  onReceiptExpense,
 }: GroupSummaryHeaderProps) {
   const isOwner = group.my_role === "owner";
   const description = group.description?.trim();
@@ -71,15 +83,33 @@ export function GroupSummaryHeader({
             Добавить расход
           </Button>
         ) : null}
-        {onVoiceExpense ? (
-          <Button
-            variant="outline"
-            size="icon"
-            aria-label="Добавить расход голосом"
-            onClick={onVoiceExpense}
-          >
-            <Mic />
-          </Button>
+        {onVoiceExpense || onReceiptExpense ? (
+          // Оба AI-входа — одна визуальная группа: при переносе строк они
+          // остаются вместе рядом с «Добавить расход», а не разъезжаются.
+          <div className="flex shrink-0 gap-1.5">
+            {onVoiceExpense ? (
+              <Button
+                variant="outline"
+                size="icon"
+                aria-label="Добавить расход голосом"
+                title="Добавить расход голосом"
+                onClick={onVoiceExpense}
+              >
+                <Mic />
+              </Button>
+            ) : null}
+            {onReceiptExpense ? (
+              <Button
+                variant="outline"
+                size="icon"
+                aria-label="Добавить расход по фото чека"
+                title="Добавить расход по фото чека"
+                onClick={onReceiptExpense}
+              >
+                <ReceiptText />
+              </Button>
+            ) : null}
+          </div>
         ) : null}
         <Button variant="outline" className="flex-1 sm:flex-none" asChild>
           <Link to={`/groups/${group.id}/invite`}>

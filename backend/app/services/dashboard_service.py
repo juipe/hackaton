@@ -23,6 +23,7 @@ from app.models.group import Group
 from app.models.user import User
 from app.repositories import group_repo
 from app.schemas.dashboard import (
+    BudgetStatusOut,
     CategoryBreakdownItem,
     CategoryBreakdownOut,
     DashboardGroupSummary,
@@ -359,10 +360,124 @@ def spending_over_time(
     return SpendingOverTimeOut(currency=currency, items=items)
 
 
+#: «Приблизились к критической точке» начинается с 85% лимита.
+BUDGET_WARNING_RATIO = Decimal("0.85")
+
+
+def budget_status(db: Session, *, user: User) -> BudgetStatusOut:
+    """Траты текущего месяца против «критической точки бюджета» пользователя.
+
+    Считается личная доля (:func:`_share_of_user`) по всем группам за текущий
+    календарный месяц — полные суммы чужих расходов лимит не съедают.
+    """
+    scope = _resolve_scope(
+        db,
+        user_id=user.id,
+        period="this_month",
+        date_from=None,
+        date_to=None,
+        group_id=None,
+    )
+    spent_cents = _share_of_user(db, scope, user.id)
+    budget = user.monthly_budget_cents
+    currency = _dominant_currency(scope.groups)
+
+    if budget is None or budget <= 0:
+        return BudgetStatusOut(
+            monthly_budget_cents=None,
+            spent_cents=spent_cents,
+            remaining_cents=None,
+            usage_percent=0.0,
+            level="none",
+            currency=currency,
+        )
+
+    usage = Decimal(spent_cents) / Decimal(budget)
+    if usage >= 1:
+        level = "critical"
+    elif usage >= BUDGET_WARNING_RATIO:
+        level = "warning"
+    else:
+        level = "ok"
+
+    return BudgetStatusOut(
+        monthly_budget_cents=budget,
+        spent_cents=spent_cents,
+        remaining_cents=budget - spent_cents,
+        usage_percent=_percentage(spent_cents, budget),
+        level=level,
+        currency=currency,
+    )
+
+
+def user_share_by_category(
+    db: Session,
+    *,
+    user: User,
+    period: str = "all",
+    date_from: date | None = None,
+    date_to: date | None = None,
+    group_id: uuid.UUID | None = None,
+) -> list[CategoryBreakdownItem]:
+    """Личная доля пользователя по категориям — а не полные суммы группы.
+
+    Тот же запрос, что :func:`_share_by_group`, но с группировкой по категории:
+    блок «сколько можно сэкономить» должен опираться на то, что тратит сам
+    пользователь, иначе чужие доли завышают его «экономию».
+    """
+    scope = _resolve_scope(
+        db,
+        user_id=user.id,
+        period=period,
+        date_from=date_from,
+        date_to=date_to,
+        group_id=group_id,
+    )
+    if scope.is_empty:
+        return []
+
+    amount = func.coalesce(func.sum(ExpenseSplit.calculated_amount_cents), 0).label(
+        "amount_cents"
+    )
+    stmt = (
+        select(
+            Category.id,
+            Category.slug,
+            Category.name,
+            Category.icon,
+            amount,
+            func.count(Expense.id).label("expense_count"),
+        )
+        .select_from(ExpenseSplit)
+        .join(Expense, Expense.id == ExpenseSplit.expense_id)
+        .join(Category, Category.id == Expense.category_id)
+        .where(ExpenseSplit.user_id == user.id, *_expense_conditions(scope))
+        .group_by(Category.id, Category.slug, Category.name, Category.icon)
+        .order_by(amount.desc(), Category.sort_order, Category.name)
+    )
+    rows = list(db.execute(stmt))
+    total_cents = sum(int(row.amount_cents or 0) for row in rows)
+    return [
+        CategoryBreakdownItem(
+            category_id=row.id,
+            slug=row.slug,
+            name=row.name,
+            icon=row.icon,
+            amount_cents=int(row.amount_cents or 0),
+            percentage=_percentage(int(row.amount_cents or 0), total_cents),
+            expense_count=int(row.expense_count or 0),
+        )
+        for row in rows
+    ]
+
+
 __all__ = [
+    "BUDGET_WARNING_RATIO",
     "DEFAULT_CURRENCY",
     "MAX_MONTH_BUCKETS",
+    "budget_status",
     "spending_by_category",
     "spending_over_time",
     "summary",
+    "user_share_by_category",
 ]
