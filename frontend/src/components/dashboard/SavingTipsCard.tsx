@@ -33,7 +33,7 @@ function LoadingState() {
       </span>
       <p className="text-[15px] font-semibold text-foreground">Анализируем расходы…</p>
       <p className="max-w-[36ch] text-[13px] text-dim">
-        Твой AI помощник работает локально — это может занять немного времени.
+        Твой AI помощник обрабатывает запрос — это может занять немного времени.
       </p>
     </div>
   );

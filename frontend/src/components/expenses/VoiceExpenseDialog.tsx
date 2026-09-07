@@ -208,7 +208,7 @@ export function VoiceExpenseDialog({ open, onOpenChange, groupId }: VoiceExpense
             {!showGroupPicker && stage === "recording" &&
               "Говорите, потом нажмите на квадрат, чтобы остановить."}
             {!showGroupPicker && stage === "processing" &&
-              "Расшифровываем запись и извлекаем данные локально."}
+              "Расшифровываем запись и извлекаем данные."}
             {!showGroupPicker && stage === "review" &&
               "Проверьте, что мы распознали, и поправьте, что нужно."}
             {!showGroupPicker && stage === "error" && "Можно попробовать ещё раз."}
@@ -310,7 +310,7 @@ export function VoiceExpenseDialog({ open, onOpenChange, groupId }: VoiceExpense
               Распознаём речь и данные о расходе…
             </p>
             <p className="max-w-[36ch] text-[13px] text-dim">
-              Твой AI помощник работает локально — это может занять до пары минут.
+              Твой AI помощник обрабатывает запрос — это может занять немного времени.
             </p>
           </div>
         ) : null}
